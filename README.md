@@ -1,4 +1,4 @@
 # School-Bus-Management-System
 
-THIS  IS THANH_GAY_LO'S SYSTEM
+THIS  IS THAI_GAY_LO'S SYSTEM
 
