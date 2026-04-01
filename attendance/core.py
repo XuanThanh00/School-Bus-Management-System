@@ -24,7 +24,7 @@ from .config import (
 )
 
 # Master Key UID — đổi thành UID thẻ tài xế, để chuỗi rỗng để disable
-MASTER_KEY_UID = ""   # vd: "0353E326"
+MASTER_KEY_UID = "0353E326"   # vd: "0353E326"
 from .logger import AttendanceLogger
 from .rfid   import RFIDReader, load_uid_records, build_uid_map
 from .display import BusDisplay
