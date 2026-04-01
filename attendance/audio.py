@@ -21,7 +21,7 @@ TRACK_FACE_MISMATCH  = 6   # 0006.mp3 — Không nhận diện được khuôn m
 # ── UART config ────────────────────────────────────────────
 UART_PORT    = "/dev/ttyAMA4"   # Pi 5: UART0 → chân 12/16
 UART_BAUD    = 9600
-DEFAULT_VOL  = 25               # 0–30
+DEFAULT_VOL  = 10               # 0–30
 
 
 class MP3Player:
