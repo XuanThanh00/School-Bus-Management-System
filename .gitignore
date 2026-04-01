@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+bus-venv/
+venv/
+
+# Model files (quá nặng)
+*.onnx
+*.onnx.data
+student_embeddings.npz
+~/.insightface/
+
+# Data
+attendance.txt
+student_img/
+registered_uids.txt
+
+# System
+.DS_Store
+*.log
