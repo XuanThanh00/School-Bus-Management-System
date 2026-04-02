@@ -1,0 +1,21 @@
+[Unit]
+Description=Pi Watchdog Service — relay heartbeat to STM32
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi5
+WorkingDirectory=/home/pi5/Bus_system
+ExecStart=/home/pi5/Bus_system/bus-venv/bin/python3 /home/pi5/Bus_system/watchdog.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Priority cao hơn main service để đảm bảo watchdog luôn chạy
+Nice=-5
+OOMScoreAdjust=-100
+
+[Install]
+WantedBy=multi-user.target
