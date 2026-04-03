@@ -89,16 +89,17 @@ class AttendanceLogger:
             self._flush()
 
     def mark_present(self, full_name: str, class_name: str,
-                     uid: str, frame_rgb) -> str:
+                     uid: str, frame_bgr) -> str:
         """
         Lưu ảnh minh chứng + upsert dòng điểm danh.
-        Tên ảnh: HoTenKhongDau_HH:MM:SS.jpg
+        Tên ảnh: HoTenKhongDau_HHMMSS.jpg
         Trả về absolute path ảnh.
+        frame_bgr: BGR frame trực tiếp từ CameraThread — cv2.imwrite nhận BGR sẵn.
         """
         ts           = time.strftime("%H:%M:%S")
         img_filename = f"{full_name.replace(' ', '')}_{ts.replace(':', '')}.jpg"
         img_path     = os.path.abspath(os.path.join(self.img_dir, img_filename))
-        cv2.imwrite(img_path, cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(img_path, frame_bgr)
 
         for row in self._rows:
             if row["FullName"] == full_name:
