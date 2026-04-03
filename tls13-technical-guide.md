@@ -16,7 +16,7 @@
 11. [Best Practices & Hardening](#11-best-practices--hardening)
 12. [Tài Liệu Tham Khảo](#12-tài-liệu-tham-khảo)
 
----
+
 
 ## 1. Tổng Quan TLS 1.3
 
@@ -1610,10 +1610,3 @@ server {
 | Cloudflare TLS 1.3 Deep Dive | https://blog.cloudflare.com/rfc-8446-aka-tls-1-3/ |
 | OWASP TLS Cheat Sheet | https://cheatsheetseries.owasp.org/cheatsheets/TLS_Cheat_Sheet.html |
 
----
-
-> **Lưu ý bảo mật:** Self-signed certificate chỉ nên dùng cho mục đích phát triển và thử nghiệm. Trong môi trường production, hãy sử dụng certificate từ CA tin cậy (Let's Encrypt, DigiCert, v.v.) hoặc triển khai Private CA nội bộ với quy trình quản lý key nghiêm ngặt.
-
----
-
-*Tài liệu này được biên soạn dựa trên RFC 8446 và các nguồn kỹ thuật đáng tin cậy. Mọi code demo đều tuân thủ chuẩn TLS 1.3, bắt buộc sử dụng AEAD cipher suites và forward secrecy.*
