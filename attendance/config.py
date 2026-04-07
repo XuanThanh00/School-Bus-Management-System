@@ -6,9 +6,10 @@
 # ── Đường dẫn ──────────────────────────────────────────────
 STUDENTS_DIR    = "students"
 STUDENT_IMG_DIR = "student_img"
-ATTENDANCE_FILE = "attendance.txt"       # file điểm danh
+ATTENDANCE_FILE = "attendance.txt"
 DB_FILE         = "student_embeddings.npz"
 UID_FILE        = "registered_uids.txt"  # format: FullName,Class,UID
+DB_SQLITE       = "bus_system.db"
 
 # ── Nhận diện khuôn mặt ────────────────────────────────────
 THRESHOLD_HIGH  = 0.4
@@ -19,17 +20,16 @@ CONFIRM_FRAMES  = 2
 THRESHOLD       = (THRESHOLD_LOW + THRESHOLD_HIGH) / 2   # 0.325
 
 # ── 2-factor (face + RFID) ─────────────────────────────────
-MATCH_WINDOW    = 30.0    # giây — face và RFID phải khớp trong khoảng này
+MATCH_WINDOW    = 30.0
 
 # ── Master Key ─────────────────────────────────────────────
-# Đổi thành UID thẻ tài xế. Để chuỗi rỗng "" để disable hoàn toàn.
 MASTER_KEY_UID      = "0353E326"
-MASTER_KEY_TIMEOUT  = 30    # giây master mode còn hiệu lực sau khi quẹt thẻ
+MASTER_KEY_TIMEOUT  = 30
 
 # ── Camera ─────────────────────────────────────────────────
 CAMERA_WIDTH    = 640
 CAMERA_HEIGHT   = 480
-PROCESS_EVERY_N = 6         # chỉ inference mỗi N frame
+PROCESS_EVERY_N = 6
 
 # ── Model / inference ──────────────────────────────────────
 ONNX_NUM_THREADS = 4

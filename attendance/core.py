@@ -21,7 +21,7 @@ from .vision     import (ImagePreprocessor, YuNetDetector,
                          BuffaloRecognizer, FaceDatabase, load_key_info)
 from .camera     import CameraThread
 from .overlay    import draw_frame
-from .logger     import AttendanceLogger
+from .db         import AttendanceDB          # ← thay AttendanceLogger
 from .rfid       import RFIDReader, load_uid_records, build_uid_map
 from .display    import BusDisplay
 from .audio      import (MP3Player, TRACK_INVITE_SCAN, TRACK_SCAN_OK,
@@ -56,8 +56,8 @@ class AttendanceSystem:
         self._picam2:     Picamera2   = None
         self._display:    BusDisplay  = None
 
-        # Logger
-        self.att_logger = AttendanceLogger()
+        # DB (thay AttendanceLogger)
+        self.att_db = AttendanceDB()
 
         # ── Face recognition state ──────────────────────────
         self._frame_counter   = 0
@@ -116,19 +116,24 @@ class AttendanceSystem:
         self.key_info = load_key_info()
         self.face_db  = FaceDatabase.load(self.detector, self.recognizer,
                                            self.preprocessor)
-        uid_records        = load_uid_records()
-        self.uid_map       = build_uid_map(uid_records)
-        self.att_logger.ensure_students(uid_records)
+        # ── Đọc từ SQLite thay vì registered_uids.txt ──────
+        uid_records  = self.att_db.get_all_students()
+        # Chuyển format: db trả về "full_name","class_name","uid"
+        # build_uid_map cần list[{"full_name","class_name","uid"}]
+        self.uid_map = build_uid_map(uid_records)
+        self.att_db.ensure_students(uid_records)
         self._check_data_mismatch(uid_records)
+        present, total = self.att_db.get_attendance_count()
         print(f"  ✓ Database: {self.face_db.count} học sinh "
-              f"| {len(self.uid_map)} thẻ RFID")
+              f"| {len(self.uid_map)} thẻ RFID "
+              f"| Đã điểm danh: {present}/{total}")
 
     def _check_data_mismatch(self, uid_records: list):
         """Cảnh báo nếu tên khớp nhưng lớp khác nhau giữa ảnh và RFID."""
         face_map = {info["full_name"]: info["class_name"]
                     for info in self.key_info.values()}
         rfid_map = {rec["full_name"]: rec["class_name"]
-                    for rec in uid_records}
+                    for rec in uid_records if rec.get("uid")}
         warned = False
         for name in set(face_map) & set(rfid_map):
             if face_map[name] != rfid_map[name]:
@@ -211,65 +216,62 @@ class AttendanceSystem:
                     rfid_display_until = self._rfid_display_until,
                 )
 
-                alive = self._display.update(
-                    frame_bgr   = frame_out,
-                    face_status = self._display_status,
-                    face_name   = self._display_student.get("name", ""),
-                    face_class  = self._display_student.get("class", ""),
-                    face_score  = self._display_student.get("score", 0.0),
-                    face_ts     = self._display_student.get("ts", ""),
-                    rfid_name   = self._disp_rfid_name,
-                    rfid_class  = self._disp_rfid_class,
-                    rfid_uid    = self._disp_rfid_uid,
-                    rfid_ts     = self._disp_rfid_ts,
-                    attendance  = len(self._confirmed_set),
-                    total       = self.face_db.count,
-                    fps         = self._current_fps,
-                    inf_ms      = avg_inf,
-                    gps_str     = self._gps_str,
-                    master_sec  = master_sec,
-                    rfid_ok     = self.rfid is not None,
-                    cam_ok      = self.cam_thread is not None,
-                    last_log    = self._last_log,
+                present, total = self.att_db.get_attendance_count()
+                still_running = self._display.update(
+                    frame_bgr    = frame_out,
+                    face_status  = self._display_status,
+                    face_name    = self._display_student.get("name", ""),
+                    face_class   = self._display_student.get("class", ""),
+                    face_score   = self._display_student.get("score", 0.0),
+                    face_ts      = self._display_student.get("ts", ""),
+                    rfid_name    = self._disp_rfid_name,
+                    rfid_class   = self._disp_rfid_class,
+                    rfid_uid     = self._disp_rfid_uid,
+                    rfid_ts      = self._disp_rfid_ts,
+                    attendance   = present,
+                    total        = total,
+                    fps          = self._current_fps,
+                    inf_ms       = avg_inf,
+                    gps_str      = self._gps_str,
+                    master_sec   = master_sec,
+                    last_log     = self._last_log,
                 )
-                if not alive:
+                if not still_running:
                     break
 
-        except KeyboardInterrupt:
-            print("\n⚠ Đã dừng bằng Ctrl+C")
         finally:
             self._cleanup()
             self._print_summary()
+
+    def stop(self):
+        """Gọi từ signal handler để dừng gracefully."""
+        self._cleanup()
 
     # ══════════════════════════════════════════════════════
     # INFERENCE
     # ══════════════════════════════════════════════════════
 
     def _run_inference(self, frame_bgr: np.ndarray):
-        """YuNet detect + W600K recognize. Kết quả → self._last_results."""
-        t          = time.perf_counter()
-        frame_proc = self.preprocessor.process_live_frame(frame_bgr)
-        detections = self.detector.detect(frame_proc)
-        results    = []
+        t0           = time.time()
+        processed    = self.preprocessor.process_live_frame(frame_bgr)
+        faces        = self.detector.detect(processed)
+        results      = []
 
-        if detections:
-            embeddings = [
-                self.recognizer.get_embedding(
-                    self.recognizer.extract_face_crop(frame_proc, det))
-                for det in detections
-            ]
-            identities = self.face_db.identify_batch(embeddings)
-            for det, (full_key, score) in zip(detections, identities):
-                x, y, w, h, conf = det
+        if faces:
+            crops = [self.recognizer.extract_face_crop(processed, f) for f in faces]
+            embs  = [self.recognizer.get_embedding(c) for c in crops]
+            hits  = self.face_db.identify_batch(embs)
+
+            for face, (full_key, score) in zip(faces, hits):
                 results.append({
-                    "bbox":     (x, y, w, h),
-                    "conf":     conf,
+                    "bbox":     face[:4],
+                    "conf":     face[4],
                     "full_key": full_key,
                     "score":    score,
                 })
 
         self._last_results = results
-        self._inference_times.append(time.perf_counter() - t)
+        self._inference_times.append(time.time() - t0)
 
     # ══════════════════════════════════════════════════════
     # RFID
@@ -280,25 +282,20 @@ class AttendanceSystem:
         if result is None:
             return
 
-        uid = result.get("uid", "")
+        uid      = result["uid"]
+        full_name = result.get("full_name")
 
         # Master Key
-        if MASTER_KEY_UID and uid == MASTER_KEY_UID.upper():
-            self._master_mode        = True
-            self._master_until       = time.time() + MASTER_KEY_TIMEOUT
-            self._rfid_display_name  = "[MASTER KEY] Nhin vao camera"
+        if uid == MASTER_KEY_UID:
+            self._master_mode       = True
+            self._master_until      = time.time() + MASTER_KEY_TIMEOUT
+            self._rfid_display_name  = "[MASTER KEY]"
             self._rfid_display_until = self._master_until
-            self._confirm_tracker    = {}
-            print("  [MASTER] Tai xe quet Master Key")
-            if self.mp3:
-                self.mp3.play(TRACK_SCAN_OK)
+            print(f"  [MASTER] Kích hoạt {MASTER_KEY_TIMEOUT}s")
             return
 
-        # Thẻ thường
-        full_name = result.get("full_name")
-        if not full_name:
-            self._rfid_display_name  = f"UNKNOWN UID: {uid}"
-            self._rfid_display_until = time.time() + 4
+        if full_name is None:
+            print(f"  [RFID] UID không đăng ký: {uid}")
             if self.mp3:
                 self.mp3.play(TRACK_SCAN_INVALID)
             return
@@ -376,12 +373,12 @@ class AttendanceSystem:
 
     def _record_attendance(self, face_key: tuple,
                            frame_bgr: np.ndarray, is_master: bool):
-        """Ghi file, log, âm thanh cho một lần điểm danh thành công."""
+        """Ghi SQLite, log, âm thanh cho một lần điểm danh thành công."""
         full_name, class_name = face_key
         uid      = self._get_uid_by_name(full_name, class_name)
         ts       = time.strftime("%H:%M:%S")
-        img_path = self.att_logger.mark_present(
-            full_name, class_name, uid, frame_bgr)
+        img_path = self.att_db.mark_present(
+            full_name, class_name, uid, frame_bgr)   # ← dùng att_db
 
         tag = " [MASTER KEY]" if is_master else ""
         self._attendance_log.append((f"{full_name}{tag}", ts))
@@ -493,19 +490,21 @@ class AttendanceSystem:
         if self.cam_thread: self.cam_thread.stop()
         if self._picam2:    self._picam2.stop()
         if self._display:   self._display.quit()
+        if self.att_db:     self.att_db.close()   # ← đóng DB connection
 
     def _print_summary(self):
         print("\n" + "=" * 55)
         print("  KẾT QUẢ ĐIỂM DANH")
         print("=" * 55)
-        for row in self.att_logger.get_rows():
+        for row in self.att_db.get_rows():
             status = "✓ Có mặt" if row["Status"] == "1" else "✗ Vắng"
             print(f"  {status}  {row['FullName']}  (lớp {row['Class']})")
         if self._attendance_log:
             print("\nChi tiết:")
             for name, ts in self._attendance_log:
                 print(f"  {ts}  {name}")
-        print(f"\nTổng    : {len(self._confirmed_set)}/{self.face_db.count}")
+        present, total = self.att_db.get_attendance_count()
+        print(f"\nTổng    : {present}/{total}")
         if self._inference_times:
             print(f"Inf avg : {np.mean(self._inference_times) * 1000:.0f}ms")
-        print(f"File    : {os.path.abspath(self.att_logger.txt_path)}")
+        print(f"DB      : {os.path.abspath(self.att_db.db_path)}")
