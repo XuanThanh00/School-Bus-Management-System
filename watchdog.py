@@ -2,40 +2,39 @@
 # ══════════════════════════════════════════════════════════
 # watchdog.py — Chạy độc lập trên Pi 5 qua systemd
 #
+# Nhiệm vụ DUY NHẤT: feed /dev/watchdog khi main.py còn sống.
+# UART STM32 do main.py quản lý hoàn toàn — watchdog không đụng vào.
+#
 # Flow:
-#   Pi boot → watchdog.py start → IDLE (chờ)
-#   main.py start → gửi "START\n" → watchdog relay START → STM32 bắt đầu đếm
-#   main.py gửi "HB\n" mỗi 3s → watchdog relay HB → STM32 reset timer
-#   main.py tắt → gửi "SHUTDOWN\n" → watchdog relay SHUTDOWN → STM32 dừng đếm
-#   main.py treo → timeout 15s → ngừng relay → STM32 timeout → gửi REBOOT
+#   Pi boot → watchdog.py start → mở /dev/watchdog
+#   main.py start → gửi "START\n" → bắt đầu feed watchdog
+#   main.py gửi "HB\n" mỗi 3s → watchdog feed /dev/watchdog mỗi 5s
+#   main.py tắt → gửi "SHUTDOWN\n" → watchdog đóng /dev/watchdog an toàn
+#   main.py treo → timeout 15s → /dev/watchdog không được feed → Pi reboot
 # ══════════════════════════════════════════════════════════
 
 import socket
-import serial
 import threading
-import subprocess
 import time
 import os
 import sys
 
 # ── Config ─────────────────────────────────────────────────
-HB_SOCKET    = "/tmp/watchdog.sock"
-UART_PORT    = "/dev/ttyAMA2"
-UART_BAUD    = 9600
-HB_TIMEOUT   = 15.0
-HB_RELAY_INT = 3.0
-LOG_FILE     = "/tmp/watchdog.log"
+HB_SOCKET         = "/tmp/watchdog.sock"
+HB_TIMEOUT        = 15.0      # giây không nhận HB từ main.py → ngừng feed
+WDT_FEED_INTERVAL = 5.0       # giây giữa 2 lần feed /dev/watchdog
+LOG_FILE          = "/tmp/watchdog.log"
+LINUX_WDT_PATH    = "/dev/watchdog"
 
-# ── Trạng thái ─────────────────────────────────────────────
+# ── State ──────────────────────────────────────────────────
 STATE_IDLE    = "IDLE"
 STATE_RUNNING = "RUNNING"
 STATE_STOPPED = "STOPPED"
 
-# ── Shared state ───────────────────────────────────────────
 state             = STATE_IDLE
 last_hb_from_main = 0.0
 state_lock        = threading.Lock()
-ser_global        = None   # UART handle dùng chung
+wdt_fd            = None
 
 
 # ── Logger ─────────────────────────────────────────────────
@@ -50,18 +49,39 @@ def log(msg: str):
         pass
 
 
-def uart_write(msg: str):
-    """Gửi message qua UART sang STM32."""
-    global ser_global
-    if ser_global:
+# ── Linux hardware watchdog ─────────────────────────────────
+def _open_wdt():
+    global wdt_fd
+    try:
+        wdt_fd = open(LINUX_WDT_PATH, 'w')
+        log(f"✓ /dev/watchdog opened")
+    except Exception as e:
+        log(f"⚠ Không mở được /dev/watchdog: {e} (bỏ qua)")
+        wdt_fd = None
+
+
+def _feed_wdt():
+    if wdt_fd:
         try:
-            ser_global.write(msg.encode())
-        except Exception as e:
-            log(f"UART write error: {e}")
+            wdt_fd.write('1')
+            wdt_fd.flush()
+        except Exception:
+            pass
+
+
+def _close_wdt_safe():
+    if wdt_fd:
+        try:
+            wdt_fd.write('V')
+            wdt_fd.flush()
+            wdt_fd.close()
+            log("✓ /dev/watchdog closed safely")
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════
-# THREAD 1: Unix socket server — nhận tín hiệu từ main.py
+# THREAD: Unix socket — nhận tín hiệu từ main.py
 # ══════════════════════════════════════════════════════════
 def socket_server():
     global state, last_hb_from_main
@@ -80,7 +100,6 @@ def socket_server():
             conn, _ = server.accept()
             data    = conn.recv(64).decode("utf-8", errors="replace").strip()
             conn.close()
-
             if not data:
                 continue
 
@@ -89,19 +108,15 @@ def socket_server():
                     state             = STATE_RUNNING
                     last_hb_from_main = time.time()
                     log("✓ Nhận START từ main.py → bắt đầu giám sát")
-                    # Relay START sang STM32 để STM32 bắt đầu đếm
-                    uart_write("START\n")
 
                 elif data == "HB":
                     if state == STATE_RUNNING:
                         last_hb_from_main = time.time()
-                        # HB được relay trong relay loop
 
                 elif data == "SHUTDOWN":
                     state = STATE_STOPPED
-                    log("✓ Nhận SHUTDOWN từ main.py → dừng giám sát")
-                    # Relay SHUTDOWN sang STM32 để STM32 dừng đếm
-                    uart_write("SHUTDOWN\n")
+                    log("✓ Nhận SHUTDOWN từ main.py")
+                    _close_wdt_safe()
 
         except Exception as e:
             log(f"Socket error: {e}")
@@ -109,112 +124,49 @@ def socket_server():
 
 
 # ══════════════════════════════════════════════════════════
-# THREAD 2: UART reader — nhận lệnh từ STM32
-# ══════════════════════════════════════════════════════════
-def uart_reader(ser: serial.Serial):
-    buf = b""
-    while True:
-        try:
-            byte = ser.read(1)
-            if not byte:
-                continue
-            buf += byte
-            if b"\n" in buf:
-                line = buf.split(b"\n")[0].decode("utf-8", errors="replace").strip()
-                buf  = b"".join(buf.split(b"\n")[1:])
-                if line:
-                    log(f"STM32 → '{line}'")
-                    with state_lock:
-                        current = state
-                    if line == "REBOOT":
-                        if current == STATE_RUNNING:
-                            do_reboot()
-                        else:
-                            log(f"  Bỏ qua REBOOT — state={current}")
-                    elif line == "START_ACK":
-                        log("✓ STM32 xác nhận đã nhận START")
-                    elif line == "SHUTDOWN_ACK":
-                        log("✓ STM32 xác nhận đã nhận SHUTDOWN")
-        except Exception as e:
-            log(f"UART read error: {e}")
-            time.sleep(1)
-
-
-# ══════════════════════════════════════════════════════════
-# REBOOT
-# ══════════════════════════════════════════════════════════
-def do_reboot():
-    global state
-    log("!!! REBOOT từ STM32 → reboot Pi...")
-    # Gửi ACK cho STM32 biết Pi đã nhận lệnh
-    uart_write("REBOOT_ACK\n")
-    time.sleep(1)
-    try:
-        subprocess.run(["sudo", "reboot"], check=False)
-    except Exception as e:
-        log(f"Lỗi reboot: {e}")
-        os.system("sudo reboot")
-
-
-# ══════════════════════════════════════════════════════════
-# MAIN — relay loop
+# MAIN
 # ══════════════════════════════════════════════════════════
 def main():
-    global ser_global
-
     log("=== Watchdog Pi khởi động ===")
-    log(f"Socket   : {HB_SOCKET}")
-    log(f"UART     : {UART_PORT} @ {UART_BAUD}")
-    log(f"Timeout  : {HB_TIMEOUT}s")
-    log(f"Trạng thái: IDLE — chờ START từ main.py")
+    log(f"Socket  : {HB_SOCKET}")
+    log(f"Timeout : {HB_TIMEOUT}s")
 
-    # Kết nối UART
-    while ser_global is None:
-        try:
-            ser_global = serial.Serial(UART_PORT, UART_BAUD, timeout=1.0)
-            log(f"✓ UART {UART_PORT} OK")
-        except Exception as e:
-            log(f"⚠ UART lỗi: {e} — thử lại 5s")
-            time.sleep(5)
+    _open_wdt()
 
-    # Khởi động threads
-    t_sock = threading.Thread(target=socket_server, daemon=True)
-    t_uart = threading.Thread(target=uart_reader, args=(ser_global,), daemon=True)
-    t_sock.start()
-    t_uart.start()
+    threading.Thread(target=socket_server, daemon=True).start()
 
-    # Relay loop
-    last_relay    = 0.0
-    prev_state    = STATE_IDLE
+    log("Trạng thái: IDLE — chờ START từ main.py")
+
+    last_wdt_feed  = time.time()
+    prev_state     = STATE_IDLE
     main_was_alive = True
 
     while True:
         now = time.time()
 
         with state_lock:
-            current_state = state
-            elapsed       = now - last_hb_from_main if last_hb_from_main > 0 else 0
+            current = state
+            elapsed = now - last_hb_from_main if last_hb_from_main > 0 else 0
 
-        # Log khi state thay đổi
-        if current_state != prev_state:
-            log(f"Trạng thái: {prev_state} → {current_state}")
-            prev_state = current_state
+        if current != prev_state:
+            log(f"Trạng thái: {prev_state} → {current}")
+            prev_state = current
 
-        if current_state == STATE_RUNNING:
+        if current == STATE_RUNNING:
             alive = elapsed < HB_TIMEOUT
 
             if alive and not main_was_alive:
                 log("✓ main.py khôi phục")
             elif not alive and main_was_alive:
-                log(f"⚠ main.py timeout {elapsed:.0f}s — ngừng relay")
+                log(f"⚠ main.py timeout {elapsed:.0f}s — dừng feed watchdog")
             main_was_alive = alive
 
-            # Relay HB sang STM32
-            if alive and (now - last_relay >= HB_RELAY_INT):
-                uart_write("HB\n")
-                last_relay = now
+            # Feed /dev/watchdog chỉ khi main.py còn sống
+            if alive and (now - last_wdt_feed >= WDT_FEED_INTERVAL):
+                _feed_wdt()
+                last_wdt_feed = now
 
-        elif current_state == STATE_STOPPED:
+        elif current == STATE_STOPPED:
             main_was_alive = True
 
         time.sleep(0.5)
@@ -225,6 +177,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         log("Watchdog dừng")
+        _close_wdt_safe()
         if os.path.exists(HB_SOCKET):
             os.remove(HB_SOCKET)
         sys.exit(0)

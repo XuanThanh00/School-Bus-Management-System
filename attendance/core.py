@@ -1,11 +1,12 @@
 # ══════════════════════════════════════════════════════════
 # attendance/core.py
 # Orchestrator chính — kết nối tất cả các module lại.
-# Không chứa logic AI hay hardware cụ thể.
+# Kiến trúc 2 tầng: RFID + Audio chuyển xuống STM32.
 # ══════════════════════════════════════════════════════════
 
 import os
 import time
+import threading
 from collections import deque
 
 import numpy as np
@@ -16,28 +17,27 @@ from .config import (
     CONFIRM_FRAMES, MATCH_WINDOW, THRESHOLD,
     MASTER_KEY_UID, MASTER_KEY_TIMEOUT,
     YUNET_PATH,
+    UART_STM32_PORT, UART_STM32_BAUD, STM32_RESET_PIN,
+    TRACK_INVITE_SCAN, TRACK_SCAN_OK, TRACK_SCAN_INVALID,
+    TRACK_FACE_START, TRACK_AUTH_OK, TRACK_FACE_MISMATCH,
+    HB_PI_INTERVAL, STM32_HB_TIMEOUT,
+    FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
 )
-from .vision     import (ImagePreprocessor, YuNetDetector,
-                         BuffaloRecognizer, FaceDatabase, load_key_info)
-from .camera     import CameraThread
-from .overlay    import draw_frame
-from .db         import AttendanceDB          # ← thay AttendanceLogger
-from .rfid       import RFIDReader, load_uid_records, build_uid_map
-from .display    import BusDisplay
-from .audio      import (MP3Player, TRACK_INVITE_SCAN, TRACK_SCAN_OK,
-                         TRACK_SCAN_INVALID, TRACK_FACE_START,
-                         TRACK_AUTH_OK, TRACK_FACE_MISMATCH)
+from .vision          import (ImagePreprocessor, YuNetDetector,
+                               BuffaloRecognizer, FaceDatabase, load_key_info)
+from .camera          import CameraThread
+from .overlay         import draw_frame
+from .db              import AttendanceDB
+from .display         import BusDisplay
+from .stm32_protocol  import STM32Protocol, FLAG_GPS_FIX
 
 
 # ──────────────────────────────────────────────────────────
-# CLASS: AttendanceSystem
-# ──────────────────────────────────────────────────────────
-
 class AttendanceSystem:
     """
     Hệ thống điểm danh 2 yếu tố: khuôn mặt + RFID.
-      setup() → khởi tạo model, DB, camera, audio, display
-      run()   → vòng lặp chính, nhấn Q/ESC để thoát
+      setup() → khởi tạo model, DB, STM32, camera, display
+      run()   → vòng lặp chính
     """
 
     def __init__(self):
@@ -48,33 +48,42 @@ class AttendanceSystem:
         self.face_db:     FaceDatabase      = None
         self.key_info:    dict              = {}
 
-        # Hardware / IO
-        self.uid_map:     dict       = {}
-        self.rfid:        RFIDReader = None
-        self.mp3:         MP3Player  = None
-        self.cam_thread:  CameraThread = None
-        self._picam2:     Picamera2   = None
-        self._display:    BusDisplay  = None
+        # Hardware
+        self.stm32:       STM32Protocol  = None
+        self.cam_thread:  CameraThread   = None
+        self._picam2:     Picamera2      = None
+        self._display:    BusDisplay     = None
 
-        # DB (thay AttendanceLogger)
+        # DB
         self.att_db = AttendanceDB()
+        self.uid_map: dict = {}
+
+        # ── STM32 / system state ────────────────────────────
+        self._handshake_done    = False
+        self._last_stm32_hb     = time.time()
+        self._last_hb_pi_sent   = 0.0
+        self._gps_lat:  float | None = None
+        self._gps_lon:  float | None = None
+        self._gps_str           = "GPS: --"
+        self._running           = False
 
         # ── Face recognition state ──────────────────────────
         self._frame_counter   = 0
-        self._last_results: list = []       # list of {bbox, conf, full_key, score}
+        self._last_results: list = []
         self._inference_times = deque(maxlen=30)
         self._fps_counter     = 0
         self._fps_timer       = time.time()
         self._current_fps     = 0.0
 
         # ── 2-factor confirm state ──────────────────────────
-        self._confirm_tracker: dict = {}    # full_key → frame count
-        self._confirmed_set:   set  = set() # (full_name, class_name)
-        self._attendance_log:  list = []    # [(name, ts), ...]
-        self._last_log:        list = []    # [(name, ts, is_master), ...]
-        self._face_pending:    dict = {}    # face_key → timestamp
-        self._rfid_pending:    dict = {}    # face_key → timestamp
+        self._confirm_tracker: dict = {}
+        self._confirmed_set:   set  = set()
+        self._attendance_log:  list = []
+        self._last_log:        list = []
+        self._face_pending:    dict = {}    # (name, cls) → timestamp
+        self._rfid_pending:    dict = {}    # (name, cls) → timestamp
         self._face_announced:  set  = set()
+        self._face_prompt_cooldown = 0.0   # giây còn lại trước khi phát lại invite
 
         # ── Master key state ────────────────────────────────
         self._master_mode  = False
@@ -83,14 +92,10 @@ class AttendanceSystem:
         # ── Display state ───────────────────────────────────
         self._display_status  = "WAITING"
         self._display_student: dict = {}
-        self._gps_str         = "GPS: --"
-
-        # RFID card display
         self._disp_rfid_name  = ""
         self._disp_rfid_class = ""
         self._disp_rfid_uid   = ""
         self._disp_rfid_ts    = 0.0
-        # Overlay RFID text trên camera feed
         self._rfid_display_name  = ""
         self._rfid_display_until = 0.0
 
@@ -99,11 +104,9 @@ class AttendanceSystem:
     # ══════════════════════════════════════════════════════
 
     def setup(self):
-        """Khởi tạo tất cả. Gọi trước run()."""
         self._load_models()
         self._load_database()
-        self._load_audio()
-        self._load_rfid()
+        self._init_stm32()
         self._start_camera()
         self._init_display()
 
@@ -116,11 +119,8 @@ class AttendanceSystem:
         self.key_info = load_key_info()
         self.face_db  = FaceDatabase.load(self.detector, self.recognizer,
                                            self.preprocessor)
-        # ── Đọc từ SQLite thay vì registered_uids.txt ──────
         uid_records  = self.att_db.get_all_students()
-        # Chuyển format: db trả về "full_name","class_name","uid"
-        # build_uid_map cần list[{"full_name","class_name","uid"}]
-        self.uid_map = build_uid_map(uid_records)
+        self.uid_map = self._build_uid_map(uid_records)
         self.att_db.ensure_students(uid_records)
         self._check_data_mismatch(uid_records)
         present, total = self.att_db.get_attendance_count()
@@ -128,8 +128,16 @@ class AttendanceSystem:
               f"| {len(self.uid_map)} thẻ RFID "
               f"| Đã điểm danh: {present}/{total}")
 
+    def _build_uid_map(self, uid_records: list) -> dict:
+        """uid_hex → {"full_name", "class_name", "uid"}"""
+        m = {}
+        for rec in uid_records:
+            uid = rec.get("uid", "").strip().upper()
+            if uid:
+                m[uid] = rec
+        return m
+
     def _check_data_mismatch(self, uid_records: list):
-        """Cảnh báo nếu tên khớp nhưng lớp khác nhau giữa ảnh và RFID."""
         face_map = {info["full_name"]: info["class_name"]
                     for info in self.key_info.values()}
         rfid_map = {rec["full_name"]: rec["class_name"]
@@ -147,14 +155,31 @@ class AttendanceSystem:
         if warned:
             print()
 
-    def _load_rfid(self):
-        self.rfid = RFIDReader(self.uid_map)
-        print("  ✓ RFID reader đang chạy")
+    def _init_stm32(self):
+        """Khởi tạo STM32Protocol, đợi handshake xong mới return."""
+        self.stm32 = STM32Protocol(
+            port       = UART_STM32_PORT,
+            baud       = UART_STM32_BAUD,
+            reset_gpio = STM32_RESET_PIN,
+            on_rfid        = self._on_rfid,
+            on_gps         = self._on_gps,
+            on_gps_no_fix  = self._on_gps_no_fix,
+            on_hb_stm32    = self._on_hb_stm32,
+            on_ready       = self._on_stm32_ready,
+            on_ack         = self._on_ack,
+        )
+        self.stm32.open()
 
-    def _load_audio(self):
-        self.mp3 = MP3Player()
-        time.sleep(1.5)
-        self.mp3.play(TRACK_INVITE_SCAN)
+        # Chờ handshake tối đa 30s
+        print("  Chờ STM32 READY...", end="", flush=True)
+        deadline = time.time() + 30
+        while not self._handshake_done and time.time() < deadline:
+            time.sleep(0.1)
+
+        if self._handshake_done:
+            print(" ✓ STM32 sẵn sàng")
+        else:
+            print(" ⚠ Timeout — tiếp tục không có STM32")
 
     def _start_camera(self):
         from libcamera import controls
@@ -177,35 +202,90 @@ class AttendanceSystem:
         print("  ✓ Pygame display sẵn sàng")
 
     # ══════════════════════════════════════════════════════
+    # STM32 CALLBACKS  (chạy trong RX thread của STM32Protocol)
+    # ══════════════════════════════════════════════════════
+
+    def _on_stm32_ready(self):
+        # ACK đã được STM32Protocol gửi tự động trong _dispatch
+        # Gửi HB_PI ngay để STM32 chuyển sang RUNNING
+        self.stm32.send_hb_pi()
+        self._last_hb_pi_sent = time.time()
+
+    def _on_hb_stm32(self, flags: int):
+        self._last_stm32_hb = time.time()
+        if not self._handshake_done:
+            self._handshake_done = True
+        if not (flags & FLAG_GPS_FIX):
+            # GPS chưa fix: giữ nguyên GPS string nếu đã có
+            pass
+
+    def _on_rfid(self, uid_hex: str):
+        """Callback khi STM32 gửi RFID_UID — chạy trong RX thread."""
+        # Dùng threading để không block RX thread
+        threading.Thread(
+            target=self._handle_rfid,
+            args=(uid_hex,),
+            daemon=True
+        ).start()
+
+    def _on_gps(self, lat: float, lon: float):
+        self._gps_lat = lat
+        self._gps_lon = lon
+        self._gps_str = f"GPS: {lat:.5f}, {lon:.5f}"
+
+    def _on_gps_no_fix(self, sat_count: int):
+        self._gps_str = f"GPS: no fix (sat={sat_count})"
+
+    def _on_ack(self, cmd_acked: int):
+        pass   # log nếu cần debug
+
+    # ══════════════════════════════════════════════════════
     # MAIN LOOP
     # ══════════════════════════════════════════════════════
 
     def run(self):
-        """Vòng lặp chính. Nhấn Q/ESC để thoát."""
         print("\nNhấn Q hoặc ESC để thoát.\n")
+        self._running        = True
         self._display_student = {}
+
         try:
-            while True:
+            while self._running:
                 frame = self.cam_thread.get_frame()
                 if frame is None:
                     time.sleep(0.01)
                     continue
 
+                now = time.time()
+
+                # ── Gửi HB_PI định kỳ ──────────────────────
+                if now - self._last_hb_pi_sent >= HB_PI_INTERVAL:
+                    self.stm32.send_hb_pi()
+                    self._last_hb_pi_sent = now
+
+                # ── Cảnh báo / reset nếu STM32 im lặng ─────
+                stm32_silent = now - self._last_stm32_hb
+                if stm32_silent > STM32_HB_TIMEOUT:
+                    print(f"  ⚠ STM32 im lặng {stm32_silent:.0f}s → hard reset")
+                    self.stm32.reset_stm32()
+                    self._last_stm32_hb = now   # reset timer tránh loop
+
+                # ── Face inference ──────────────────────────
                 self._frame_counter += 1
                 if self._frame_counter % PROCESS_EVERY_N == 0:
-                    self._run_inference(frame)
+                    self._run_inference(frame, now)
 
-                self._check_rfid()
+                # ── 2-factor confirm ────────────────────────
                 self._try_master_confirm(frame)
                 self._try_confirm(frame)
-                self._update_display_status()
+                self._update_display_status(now)
                 self._update_fps()
 
-                avg_inf    = (int(np.mean(self._inference_times) * 1000)
-                              if self._inference_times else 0)
-                master_sec = (max(0, int(self._master_until - time.time()))
+                # ── Render ──────────────────────────────────
+                avg_inf   = (int(np.mean(self._inference_times) * 1000)
+                             if self._inference_times else 0)
+                master_sec = (max(0, int(self._master_until - now))
                               if self._master_mode else 0)
-                frame_out  = draw_frame(
+                frame_out = draw_frame(
                     frame,
                     last_results       = self._last_results,
                     key_info           = self.key_info,
@@ -245,23 +325,25 @@ class AttendanceSystem:
 
     def stop(self):
         """Gọi từ signal handler để dừng gracefully."""
+        self._running = False
         self._cleanup()
 
     # ══════════════════════════════════════════════════════
     # INFERENCE
     # ══════════════════════════════════════════════════════
 
-    def _run_inference(self, frame_bgr: np.ndarray):
-        t0           = time.time()
-        processed    = self.preprocessor.process_live_frame(frame_bgr)
-        faces        = self.detector.detect(processed)
-        results      = []
+    def _run_inference(self, frame_bgr: np.ndarray, now: float):
+        t0        = time.time()
+        processed = self.preprocessor.process_live_frame(frame_bgr)
+        faces     = self.detector.detect(processed)
+        results   = []
+
+        has_face = bool(faces)
 
         if faces:
             crops = [self.recognizer.extract_face_crop(processed, f) for f in faces]
             embs  = [self.recognizer.get_embedding(c) for c in crops]
             hits  = self.face_db.identify_batch(embs)
-
             for face, (full_key, score) in zip(faces, hits):
                 results.append({
                     "bbox":     face[:4],
@@ -273,50 +355,65 @@ class AttendanceSystem:
         self._last_results = results
         self._inference_times.append(time.time() - t0)
 
+        # ── Phát "mời quét thẻ" khi detect được mặt ────────
+        if has_face:
+            if now >= self._face_prompt_cooldown:
+                waiting_rfid = any(
+                    (now - ts) <= RFID_WAIT_TIMEOUT
+                    for ts in self._face_pending.values()
+                )
+                if not waiting_rfid:
+                    self.stm32.send_play_audio(TRACK_INVITE_SCAN)
+                    self._face_prompt_cooldown = now + FACE_PROMPT_COOLDOWN
+        else:
+            self._face_prompt_cooldown = 0.0
+
     # ══════════════════════════════════════════════════════
-    # RFID
+    # RFID HANDLER
     # ══════════════════════════════════════════════════════
 
-    def _check_rfid(self):
-        result = self.rfid.get_and_clear()
-        if result is None:
-            return
+    def _handle_rfid(self, uid_hex: str):
+        """Xử lý UID nhận từ STM32 (chạy trong thread riêng)."""
+        now = time.time()
 
-        uid      = result["uid"]
-        full_name = result.get("full_name")
-
-        # Master Key
-        if uid == MASTER_KEY_UID:
+        # ── Master Key ──────────────────────────────────────
+        if uid_hex == MASTER_KEY_UID:
             self._master_mode       = True
-            self._master_until      = time.time() + MASTER_KEY_TIMEOUT
+            self._master_until      = now + MASTER_KEY_TIMEOUT
             self._rfid_display_name  = "[MASTER KEY]"
             self._rfid_display_until = self._master_until
             print(f"  [MASTER] Kích hoạt {MASTER_KEY_TIMEOUT}s")
             return
 
-        if full_name is None:
-            print(f"  [RFID] UID không đăng ký: {uid}")
-            if self.mp3:
-                self.mp3.play(TRACK_SCAN_INVALID)
+        # ── Lookup DB ───────────────────────────────────────
+        rec = self.uid_map.get(uid_hex)
+        if rec is None:
+            print(f"  [RFID] UID không đăng ký: {uid_hex}")
+            self.stm32.send_play_audio(TRACK_SCAN_INVALID)
             return
 
-        class_name = result.get("class_name", "")
-        self._rfid_pending[(full_name, class_name)] = result["timestamp"]
+        full_name  = rec["full_name"]
+        class_name = rec["class_name"]
+
+        # ── Cập nhật display ────────────────────────────────
         self._rfid_display_name  = f"ID: {full_name}"
-        self._rfid_display_until = time.time() + 5
+        self._rfid_display_until = now + 5
         self._disp_rfid_name     = full_name
         self._disp_rfid_class    = class_name
-        self._disp_rfid_uid      = uid
-        self._disp_rfid_ts       = time.time()
-        if self.mp3:
-            self.mp3.play(TRACK_SCAN_OK)
+        self._disp_rfid_uid      = uid_hex
+        self._disp_rfid_ts       = now
+
+        self.stm32.send_play_audio(TRACK_SCAN_OK)
+
+        # ── Đưa vào rfid_pending để 2-factor ghép với face ──
+        self._rfid_pending[(full_name, class_name)] = now
+        print(f"  [RFID] {full_name} ({class_name}) — chờ xác thực mặt")
 
     # ══════════════════════════════════════════════════════
     # 2-FACTOR CONFIRM
     # ══════════════════════════════════════════════════════
 
     def _try_confirm(self, frame_bgr: np.ndarray):
-        """Ghép face_pending ∩ rfid_pending → điểm danh."""
         now = time.time()
 
         rfid_expired = {k for k, v in self._rfid_pending.items()
@@ -327,8 +424,8 @@ class AttendanceSystem:
                               if now - v <= MATCH_WINDOW}
 
         for key in rfid_expired:
-            if key not in self._confirmed_set and self.mp3:
-                self.mp3.play(TRACK_FACE_MISMATCH)
+            if key not in self._confirmed_set:
+                self.stm32.send_play_audio(TRACK_FACE_MISMATCH)
 
         for key in list(self._face_pending):
             if key in self._rfid_pending and key not in self._confirmed_set:
@@ -339,7 +436,6 @@ class AttendanceSystem:
                 self._record_attendance(key, frame_bgr, is_master=False)
 
     def _try_master_confirm(self, frame_bgr: np.ndarray):
-        """Master mode: face đủ confirm → điểm danh ngay, không cần RFID."""
         if not self._master_mode:
             return
         if time.time() > self._master_until:
@@ -373,12 +469,14 @@ class AttendanceSystem:
 
     def _record_attendance(self, face_key: tuple,
                            frame_bgr: np.ndarray, is_master: bool):
-        """Ghi SQLite, log, âm thanh cho một lần điểm danh thành công."""
         full_name, class_name = face_key
         uid      = self._get_uid_by_name(full_name, class_name)
         ts       = time.strftime("%H:%M:%S")
         img_path = self.att_db.mark_present(
-            full_name, class_name, uid, frame_bgr)   # ← dùng att_db
+            full_name, class_name, uid, frame_bgr,
+            gps_lat=self._gps_lat,
+            gps_lon=self._gps_lon,
+        )
 
         tag = " [MASTER KEY]" if is_master else ""
         self._attendance_log.append((f"{full_name}{tag}", ts))
@@ -386,15 +484,13 @@ class AttendanceSystem:
         print(f"  ✓ ĐIỂM DANH{tag}: {full_name} | lớp {class_name} | {ts}")
         print(f"    → {img_path}")
 
-        if self.mp3:
-            self.mp3.play(TRACK_AUTH_OK)
+        self.stm32.send_play_audio(TRACK_AUTH_OK)
 
     # ══════════════════════════════════════════════════════
     # DISPLAY STATE
     # ══════════════════════════════════════════════════════
 
-    def _update_display_status(self):
-        """Cập nhật trạng thái cho Pygame card FACE."""
+    def _update_display_status(self, now: float):
         if self._master_mode:
             self._display_status = "MASTER"
             return
@@ -405,7 +501,6 @@ class AttendanceSystem:
                 if best is None or r["score"] > best["score"]:
                     best = r
 
-        # Reset confirm_tracker cho mặt không còn trong frame
         seen = {r["full_key"] for r in self._last_results if r.get("full_key")}
         for k in list(self._confirm_tracker):
             if k not in seen:
@@ -438,11 +533,10 @@ class AttendanceSystem:
         count = self._confirm_tracker[full_key]
 
         if count >= CONFIRM_FRAMES:
-            self._face_pending[face_key] = time.time()
+            self._face_pending[face_key] = now
             if face_key not in self._face_announced:
                 self._face_announced.add(face_key)
-                if self.mp3:
-                    self.mp3.play(TRACK_FACE_START)
+                self.stm32.send_play_audio(TRACK_FACE_START)
             self._display_status  = "WAIT_RFID"
             self._display_student = {
                 "name": full_name, "class": class_name,
@@ -485,26 +579,38 @@ class AttendanceSystem:
     # ══════════════════════════════════════════════════════
 
     def _cleanup(self):
-        if self.mp3:        self.mp3.stop()
-        if self.rfid:       self.rfid.stop()
+        if self.stm32:
+            self.stm32.send_shutdown()
+            time.sleep(0.3)
+            self.stm32.close()
         if self.cam_thread: self.cam_thread.stop()
         if self._picam2:    self._picam2.stop()
         if self._display:   self._display.quit()
-        if self.att_db:     self.att_db.close()   # ← đóng DB connection
+        # att_db.close() KHÔNG gọi ở đây — gọi ở cuối _print_summary
 
     def _print_summary(self):
         print("\n" + "=" * 55)
         print("  KẾT QUẢ ĐIỂM DANH")
         print("=" * 55)
-        for row in self.att_db.get_rows():
-            status = "✓ Có mặt" if row["Status"] == "1" else "✗ Vắng"
-            print(f"  {status}  {row['FullName']}  (lớp {row['Class']})")
-        if self._attendance_log:
-            print("\nChi tiết:")
-            for name, ts in self._attendance_log:
-                print(f"  {ts}  {name}")
-        present, total = self.att_db.get_attendance_count()
-        print(f"\nTổng    : {present}/{total}")
+        try:
+            for row in self.att_db.get_rows():
+                status = "✓ Có mặt" if row["Status"] == "1" else "✗ Vắng"
+                print(f"  {status}  {row['FullName']}  (lớp {row['Class']})")
+            if self._attendance_log:
+                print("\nChi tiết:")
+                for name, ts in self._attendance_log:
+                    print(f"  {ts}  {name}")
+            present, total = self.att_db.get_attendance_count()
+            print(f"\nTổng    : {present}/{total}")
+        except Exception as e:
+            print(f"  (lỗi đọc DB: {e})")
         if self._inference_times:
             print(f"Inf avg : {np.mean(self._inference_times) * 1000:.0f}ms")
         print(f"DB      : {os.path.abspath(self.att_db.db_path)}")
+        if self.stm32:
+            print(f"STM32   : rx_ok={self.stm32.pkts_rx_ok} "
+                  f"rx_err={self.stm32.pkts_rx_err} "
+                  f"tx={self.stm32.pkts_tx}")
+        # Đóng DB sau khi đọc xong
+        if self.att_db:
+            self.att_db.close()

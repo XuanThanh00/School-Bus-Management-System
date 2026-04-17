@@ -21,9 +21,9 @@ class AttendanceDB:
     Quản lý toàn bộ dữ liệu qua SQLite (WAL mode).
 
     Bảng:
-      students           — danh sách học sinh + UID thẻ
+      students            — danh sách học sinh + UID thẻ
       attendance_sessions — 1 session/ngày
-      attendance_records — bản ghi điểm danh (upsert-safe)
+      attendance_records  — bản ghi điểm danh (upsert-safe)
 
     Public API:
       ensure_students(records)     — sync danh sách học sinh
@@ -71,13 +71,13 @@ class AttendanceDB:
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 full_name  TEXT NOT NULL,
                 class_name TEXT NOT NULL,
-                uid        TEXT UNIQUE,          -- NULL nếu chưa đăng ký thẻ
+                uid        TEXT UNIQUE,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime'))
             );
 
             CREATE TABLE IF NOT EXISTS attendance_sessions (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                date       TEXT UNIQUE NOT NULL,  -- YYYY-MM-DD
+                date       TEXT UNIQUE NOT NULL,
                 route      TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now','localtime'))
             );
@@ -86,7 +86,7 @@ class AttendanceDB:
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id    INTEGER NOT NULL REFERENCES attendance_sessions(id),
                 student_id    INTEGER NOT NULL REFERENCES students(id),
-                status        INTEGER NOT NULL DEFAULT 0,  -- 0=vắng, 1=có mặt
+                status        INTEGER NOT NULL DEFAULT 0,
                 checked_at    TEXT,
                 evidence_path TEXT,
                 UNIQUE(session_id, student_id)
@@ -94,6 +94,18 @@ class AttendanceDB:
 
             COMMIT;
         """)
+        # Migrate: thêm cột GPS nếu chưa có (idempotent — chạy lại không lỗi)
+        existing = {row[1] for row in self._conn.execute(
+            "PRAGMA table_info(attendance_records)"
+        ).fetchall()}
+        if "gps_lat" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN gps_lat REAL"
+            )
+        if "gps_lon" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN gps_lon REAL"
+            )
 
     # ══════════════════════════════════════════════════════
     # SESSION
@@ -139,7 +151,7 @@ class AttendanceDB:
             class_name = rec["class_name"]
             uid        = rec["uid"].upper()
 
-            # Upsert student (giữ nguyên nếu đã tồn tại theo uid)
+            # Upsert student
             self._conn.execute("""
                 INSERT INTO students (full_name, class_name, uid)
                 VALUES (?, ?, ?)
@@ -171,7 +183,6 @@ class AttendanceDB:
     def register_uid(self, full_name: str, class_name: str, uid: str):
         """
         Upsert từ save_uid.py — thêm hoặc cập nhật học sinh theo UID.
-        Nếu UID đã thuộc người khác, cập nhật thành người mới.
         """
         uid = uid.strip().upper()
         existing = self._conn.execute(
@@ -204,10 +215,7 @@ class AttendanceDB:
     # ══════════════════════════════════════════════════════
 
     def get_uid_map(self) -> dict:
-        """
-        uid_hex → {"full_name", "class_name", "uid"}
-        Dùng bởi RFIDReader và AttendanceSystem.
-        """
+        """uid_hex → {"full_name", "class_name", "uid"}"""
         rows = self._conn.execute(
             "SELECT full_name, class_name, uid FROM students WHERE uid IS NOT NULL"
         ).fetchall()
@@ -225,11 +233,14 @@ class AttendanceDB:
     # ══════════════════════════════════════════════════════
 
     def mark_present(self, full_name: str, class_name: str,
-                     uid: str, frame_bgr) -> str:
+                     uid: str, frame_bgr,
+                     gps_lat: float = None,
+                     gps_lon: float = None) -> str:
         """
         Lưu ảnh minh chứng + upsert attendance_record → status=1.
         Trả về absolute path ảnh.
         frame_bgr: BGR frame — cv2.imwrite nhận BGR sẵn.
+        gps_lat/lon: tọa độ GPS lúc điểm danh (None nếu chưa có fix).
         """
         session_id = self.get_today_session_id()
         ts         = time.strftime("%H:%M:%S")
@@ -239,7 +250,7 @@ class AttendanceDB:
         img_path     = os.path.abspath(os.path.join(self.img_dir, img_filename))
         cv2.imwrite(img_path, frame_bgr)
 
-        # Tìm student_id (có thể đăng ký bằng cả uid lẫn tên+lớp)
+        # Tìm student_id
         uid = uid.upper() if uid else ""
         row = self._conn.execute(
             "SELECT id FROM students WHERE uid = ?", (uid,)
@@ -252,13 +263,12 @@ class AttendanceDB:
             ).fetchone()
 
         if row is None:
-            # Học sinh chưa tồn tại (edge case) — tạo mới
+            # Edge case: học sinh chưa tồn tại → tạo mới
             cur = self._conn.execute(
                 "INSERT INTO students (full_name, class_name, uid) VALUES (?, ?, ?)",
                 (full_name, class_name, uid or None)
             )
             student_id = cur.lastrowid
-            # Tạo attendance_record mới
             self._conn.execute("""
                 INSERT OR IGNORE INTO attendance_records (session_id, student_id, status)
                 VALUES (?, ?, 0)
@@ -266,15 +276,18 @@ class AttendanceDB:
         else:
             student_id = row["id"]
 
-        # Upsert → status=1
+        # Upsert → status=1, ghi GPS nếu có
         self._conn.execute("""
-            INSERT INTO attendance_records (session_id, student_id, status, checked_at, evidence_path)
-            VALUES (?, ?, 1, ?, ?)
+            INSERT INTO attendance_records
+                (session_id, student_id, status, checked_at, evidence_path, gps_lat, gps_lon)
+            VALUES (?, ?, 1, ?, ?, ?, ?)
             ON CONFLICT(session_id, student_id) DO UPDATE SET
                 status        = 1,
                 checked_at    = excluded.checked_at,
-                evidence_path = excluded.evidence_path
-        """, (session_id, student_id, ts, img_path))
+                evidence_path = excluded.evidence_path,
+                gps_lat       = excluded.gps_lat,
+                gps_lon       = excluded.gps_lon
+        """, (session_id, student_id, ts, img_path, gps_lat, gps_lon))
 
         return img_path
 
@@ -284,9 +297,8 @@ class AttendanceDB:
 
     def get_rows(self) -> list[dict]:
         """
-        Trả về list[dict] tương đương AttendanceLogger.get_rows()
-        để _print_summary trong core.py dùng được mà không cần sửa.
-        Keys: FullName, Class, UID, Status, Time, Evidence
+        Trả về list[dict] để _print_summary dùng.
+        Keys: FullName, Class, UID, Status, Time, Evidence, GpsLat, GpsLon
         """
         session_id = self.get_today_session_id()
         rows = self._conn.execute("""
@@ -296,7 +308,9 @@ class AttendanceDB:
                 COALESCE(s.uid, '') AS UID,
                 COALESCE(ar.status, 0) AS Status,
                 COALESCE(ar.checked_at, '') AS Time,
-                COALESCE(ar.evidence_path, '') AS Evidence
+                COALESCE(ar.evidence_path, '') AS Evidence,
+                ar.gps_lat AS GpsLat,
+                ar.gps_lon AS GpsLon
             FROM students s
             LEFT JOIN attendance_records ar
                 ON ar.student_id = s.id AND ar.session_id = ?
@@ -310,6 +324,8 @@ class AttendanceDB:
                 "Status":   str(r["Status"]),
                 "Time":     r["Time"],
                 "Evidence": r["Evidence"],
+                "GpsLat":   r["GpsLat"],
+                "GpsLon":   r["GpsLon"],
             }
             for r in rows
         ]
