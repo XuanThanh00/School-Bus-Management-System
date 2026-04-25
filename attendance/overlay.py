@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════
 # attendance/overlay.py
-# Vẽ annotation lên camera feed: bounding box, score bar,
+# Draw annotations on camera feed: bounding boxes, score bar,
 # master key banner, RFID toast.
 # ══════════════════════════════════════════════════════════
 
@@ -23,22 +23,22 @@ def draw_frame(
     rfid_display_until: float   = 0.0,
 ) -> np.ndarray:
     """
-    Vẽ annotation lên frame BGR và trả về frame mới (không sửa in-place).
+    Draw annotations on a BGR frame and return a new frame (not in-place).
 
-    Màu bounding box:
-      xanh lá  (0, 220, 80)  — đã điểm danh
-      xanh lam (55, 138, 221) — nhận ra, đang chờ RFID
-      xanh tối (60, 60, 200)  — không nhận ra
+    Bounding box colors:
+      green (0, 220, 80)   — checked in
+      blue  (55, 138, 221) — recognized, waiting for RFID
+      dark  (60, 60, 200)  — not recognized
 
     Parameters
     ----------
     last_results       : list of {bbox, conf, full_key, score}
     key_info           : dict[full_key → {full_name, class_name, display}]
-    confirmed_set      : set of (full_name, class_name) đã điểm danh
-    master_mode        : có đang trong master key mode không
-    master_until       : timestamp hết hạn master mode
-    rfid_display_name  : text toast RFID hiện trên góc frame
-    rfid_display_until : timestamp hết hạn toast
+    confirmed_set      : set of (full_name, class_name) already checked in
+    master_mode        : whether master key mode is active
+    master_until       : expiry timestamp for master mode
+    rfid_display_name  : RFID toast text shown in the frame corner
+    rfid_display_until : expiry timestamp for the toast
     """
     out = frame_bgr.copy()
 
@@ -64,7 +64,7 @@ def draw_frame(
         # Box
         cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)
 
-        # Label với nền
+        # Label with background fill
         (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
         cv2.rectangle(out, (x, y - th - 8), (x + tw + 6, y), color, -1)
         cv2.putText(out, label, (x + 3, y - 4),

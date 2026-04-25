@@ -17,7 +17,7 @@ from ..config import (
 
 class YuNetDetector:
     """
-    Wrapper cho cv2.FaceDetectorYN (YuNet).
+    Wrapper for cv2.FaceDetectorYN (YuNet).
     detect() → list of (x, y, w, h, confidence).
     """
 
@@ -41,8 +41,8 @@ class YuNetDetector:
 
     def detect(self, frame_bgr) -> list[tuple]:
         """
-        Nhận frame BGR, trả về list of (x, y, w, h, confidence).
-        Input size tự điều chỉnh theo frame thực tế.
+        Accept BGR frame, return list of (x, y, w, h, confidence).
+        Input size is adjusted automatically to match the actual frame.
         """
         h, w = frame_bgr.shape[:2]
         self._detector.setInputSize((w, h))

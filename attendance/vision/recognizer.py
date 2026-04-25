@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════
 # attendance/vision/recognizer.py
-# Buffalo_l W600K face recognizer — ONNX trực tiếp, không qua FaceAnalysis.
+# Buffalo_l W600K face recognizer — direct ONNX, no FaceAnalysis wrapper.
 # Output: 512-d L2-normalized embedding.
 # ══════════════════════════════════════════════════════════
 
@@ -15,11 +15,11 @@ from ..config import ONNX_NUM_THREADS, FACE_MARGIN
 
 class BuffaloRecognizer:
     """
-    Face recognition dùng W600K (buffalo_l) qua ONNX.
-    Load trực tiếp w600k_r50.onnx, không dùng FaceAnalysis ở runtime.
+    Face recognition using W600K (buffalo_l) via ONNX.
+    Loads w600k_r50.onnx directly; FaceAnalysis is only used once for model download.
 
-    get_embedding(face_bgr)      → 512-d ndarray (L2-normalized)
-    extract_face_crop(frame, bbox) → BGR crop với margin
+    get_embedding(face_bgr)        → 512-d ndarray (L2-normalised)
+    extract_face_crop(frame, bbox) → BGR crop with margin
     """
 
     MODEL_PATH = os.path.expanduser(
@@ -43,7 +43,7 @@ class BuffaloRecognizer:
         print(f"  ✓ Buffalo_l W600K ready ({sz:.0f} MB) — 512-d embedding")
 
     def _ensure_model(self):
-        """Download buffalo_l nếu chưa có bằng cách trigger FaceAnalysis một lần."""
+        """Download buffalo_l once via FaceAnalysis if the model file is missing."""
         if os.path.exists(self.MODEL_PATH):
             return
         print("  Downloading buffalo_l W600K (174 MB)...")
@@ -59,7 +59,7 @@ class BuffaloRecognizer:
     # ── Public ─────────────────────────────────────────────
 
     def get_embedding(self, face_bgr: np.ndarray) -> np.ndarray:
-        """BGR crop (bất kỳ kích thước) → 512-d float32, L2-normalized."""
+        """BGR crop (any size) → 512-d float32, L2-normalised."""
         img  = cv2.resize(face_bgr, (112, 112))
         img  = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
         img  = (img - 127.5) / 127.5
@@ -74,8 +74,8 @@ class BuffaloRecognizer:
                           bbox: tuple,
                           margin: float = FACE_MARGIN) -> np.ndarray:
         """
-        Crop mặt từ frame với margin mở rộng.
-        bbox = (x, y, w, h, ...) — chỉ dùng 4 phần tử đầu.
+        Crop face from frame with expanded margin.
+        bbox = (x, y, w, h, ...) — only the first 4 elements are used.
         """
         h, w   = frame_bgr.shape[:2]
         x, y, fw, fh = bbox[:4]
@@ -83,7 +83,7 @@ class BuffaloRecognizer:
         x1, y1 = max(0, x - mx),      max(0, y - my)
         x2, y2 = min(w, x + fw + mx), min(h, y + fh + my)
         crop   = frame_bgr[y1:y2, x1:x2]
-        # Fallback nếu crop rỗng (bbox sát mép frame)
+        # Fallback: empty crop when bbox is at the frame edge
         if crop.size == 0:
             crop = frame_bgr[max(0, y):y + fh, max(0, x):x + fw]
         return crop

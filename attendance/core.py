@@ -1,8 +1,4 @@
-# ══════════════════════════════════════════════════════════
-# attendance/core.py
-# Orchestrator chính — kết nối tất cả các module lại.
-# Kiến trúc 2 tầng: RFID + Audio chuyển xuống STM32.
-# ══════════════════════════════════════════════════════════
+# attendance/core.py — main orchestrator (two-tier: RFID+audio delegated to STM32)
 
 import os
 import time
@@ -22,7 +18,7 @@ from .config import (
     TRACK_FACE_START, TRACK_AUTH_OK, TRACK_FACE_MISMATCH,
     HB_PI_INTERVAL, STM32_HB_TIMEOUT,
     FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
-    FIREBASE_URL, GPS_PUSH_INTERVAL, STUDENT_IMG_DIR,
+    FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL,
     STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR
 )
 from .vision          import (ImagePreprocessor, YuNetDetector,
@@ -36,11 +32,7 @@ from .stm32_protocol  import STM32Protocol, FLAG_GPS_FIX
 
 # ──────────────────────────────────────────────────────────
 class AttendanceSystem:
-    """
-    Hệ thống điểm danh 2 yếu tố: khuôn mặt + RFID.
-      setup() → khởi tạo model, DB, STM32, camera, display
-      run()   → vòng lặp chính
-    """
+    """Two-factor attendance system (face + RFID). Call setup() then run()."""
 
     def __init__(self):
         # AI components
@@ -90,7 +82,7 @@ class AttendanceSystem:
         self._face_pending:    dict = {}    # (name, cls) → timestamp
         self._rfid_pending:    dict = {}    # (name, cls) → timestamp
         self._face_announced:  set  = set()
-        self._face_prompt_cooldown = 0.0   # giây còn lại trước khi phát lại invite
+        self._face_prompt_cooldown = 0.0   # seconds until next invite prompt
 
         # ── Master key state ────────────────────────────────
         self._master_mode  = False
@@ -106,9 +98,7 @@ class AttendanceSystem:
         self._rfid_display_name  = ""
         self._rfid_display_until = 0.0
 
-    # ══════════════════════════════════════════════════════
-    # SETUP
-    # ══════════════════════════════════════════════════════
+    # ── Setup ─────────────────────────────────────────────
 
     def setup(self):
         self._init_cloud()
@@ -164,7 +154,7 @@ class AttendanceSystem:
             print()
 
     def _init_stm32(self):
-        """Khởi tạo STM32Protocol, đợi handshake xong mới return."""
+        """Initialize STM32Protocol and block until handshake completes."""
         self.stm32 = STM32Protocol(
             port       = UART_STM32_PORT,
             baud       = UART_STM32_BAUD,
@@ -178,7 +168,7 @@ class AttendanceSystem:
         )
         self.stm32.open()
 
-        # Chờ handshake tối đa 30s
+        # Wait up to 30s for handshake
         print("  Chờ STM32 READY...", end="", flush=True)
         deadline = time.time() + 30
         while not self._handshake_done and time.time() < deadline:
@@ -213,7 +203,7 @@ class AttendanceSystem:
         from .cloud_sync import CloudSync
         print("Đang kết nối hệ sinh thái Cloud Firebase (Realtime + Firestore)...")
         self._cloud = CloudSync(
-            service_account_path="credentials.json",
+            service_account_path=SERVICE_ACCOUNT_PATH,
             database_url=FIREBASE_URL
         )
 
@@ -235,13 +225,11 @@ class AttendanceSystem:
             # Reset attendanceStatus cho web admin
             self._cloud.reset_all_attendance_status()
 
-    # ══════════════════════════════════════════════════════
-    # STM32 CALLBACKS  (chạy trong RX thread của STM32Protocol)
-    # ══════════════════════════════════════════════════════
+    # ── STM32 callbacks (run in STM32Protocol RX thread) ──
 
     def _on_stm32_ready(self):
-        # ACK đã được STM32Protocol gửi tự động trong _dispatch
-        # Gửi HB_PI ngay để STM32 chuyển sang RUNNING
+        # ACK is sent automatically by STM32Protocol in _dispatch
+        # Send HB_PI immediately to transition STM32 to RUNNING
         self.stm32.send_hb_pi()
         self._last_hb_pi_sent = time.time()
 
@@ -251,8 +239,8 @@ class AttendanceSystem:
             self._handshake_done = True
 
     def _on_rfid(self, uid_hex: str):
-        """Callback khi STM32 gửi RFID_UID — chạy trong RX thread."""
-        # Dùng threading để không block RX thread
+        """Called by STM32 RX thread on RFID_UID packet."""
+        # Offload to avoid blocking the RX thread
         threading.Thread(
             target=self._handle_rfid,
             args=(uid_hex,),
@@ -269,11 +257,9 @@ class AttendanceSystem:
         self._gps_str = f"GPS: no fix (sat={sat_count})"
 
     def _on_ack(self, cmd_acked: int):
-        pass   # log nếu cần debug
+        pass
 
-    # ══════════════════════════════════════════════════════
-    # MAIN LOOP
-    # ══════════════════════════════════════════════════════
+    # ── Main loop ─────────────────────────────────────────
 
     def run(self):
         print("\nNhấn Q hoặc ESC để thoát.\n")
@@ -289,19 +275,16 @@ class AttendanceSystem:
 
                 now = time.time()
 
-                # ── Gửi HB_PI định kỳ ──────────────────────
                 if now - self._last_hb_pi_sent >= HB_PI_INTERVAL:
                     self.stm32.send_hb_pi()
                     self._last_hb_pi_sent = now
 
-                # ── Cảnh báo / reset nếu STM32 im lặng ─────
                 stm32_silent = now - self._last_stm32_hb
                 if stm32_silent > STM32_HB_TIMEOUT:
-                    print(f"  ⚠ STM32 im lặng {stm32_silent:.0f}s → hard reset")
+                    print(f"  ⚠ STM32 silent for {stm32_silent:.0f}s → hard reset")
                     self.stm32.reset_stm32()
-                    self._last_stm32_hb = now   # reset timer tránh loop
+                    self._last_stm32_hb = now   # reset timer to avoid reset loop
 
-                # ── Push GPS lên Firebase định kỳ ───────────
                 if (self._cloud
                         and self._gps_lat is not None
                         and now - self._last_gps_push >= GPS_PUSH_INTERVAL):
@@ -313,18 +296,16 @@ class AttendanceSystem:
                     ).start()
                     self._last_gps_push = now
 
-                # ── Face inference ──────────────────────────
                 self._frame_counter += 1
                 if self._frame_counter % PROCESS_EVERY_N == 0:
                     self._run_inference(frame, now)
 
-                # ── 2-factor confirm ────────────────────────
                 self._try_master_confirm(frame)
                 self._try_confirm(frame)
                 self._update_display_status(now)
                 self._update_fps()
 
-                # ── Render ──────────────────────────────────
+
                 avg_inf   = (int(np.mean(self._inference_times) * 1000)
                              if self._inference_times else 0)
                 master_sec = (max(0, int(self._master_until - now))
@@ -372,9 +353,7 @@ class AttendanceSystem:
         self._running = False
         self._cleanup()
 
-    # ══════════════════════════════════════════════════════
-    # INFERENCE
-    # ══════════════════════════════════════════════════════
+    # ── Inference ─────────────────────────────────────────
 
     def _run_inference(self, frame_bgr: np.ndarray, now: float):
         t0        = time.time()
@@ -400,15 +379,13 @@ class AttendanceSystem:
         self._inference_times.append(time.time() - t0)
 
 
-    # ══════════════════════════════════════════════════════
-    # RFID HANDLER
-    # ══════════════════════════════════════════════════════
+    # ── RFID handler ──────────────────────────────────────
 
     def _handle_rfid(self, uid_hex: str):
-        """Xử lý UID nhận từ STM32 (chạy trong thread riêng)."""
+        """Process UID received from STM32 (runs in dedicated thread)."""
         now = time.time()
 
-        # ── Master Key ──────────────────────────────────────
+
         if uid_hex == MASTER_KEY_UID:
             self._master_mode       = True
             self._master_until      = now + MASTER_KEY_TIMEOUT
@@ -417,17 +394,15 @@ class AttendanceSystem:
             print(f"  [MASTER] Kích hoạt {MASTER_KEY_TIMEOUT}s")
             return
 
-        # ── Lookup DB ───────────────────────────────────────
         rec = self.uid_map.get(uid_hex)
         if rec is None:
-            print(f"  [RFID] UID không đăng ký: {uid_hex}")
+            print(f"  [RFID] Unregistered UID: {uid_hex}")
             self.stm32.send_play_audio(TRACK_SCAN_INVALID)
             return
 
         full_name  = rec["full_name"]
         class_name = rec["class_name"]
 
-        # ── Cập nhật display ────────────────────────────────
         self._rfid_display_name  = f"ID: {full_name}"
         self._rfid_display_until = now + 5
         self._disp_rfid_name     = full_name
@@ -437,10 +412,8 @@ class AttendanceSystem:
 
         self.stm32.send_play_audio(TRACK_SCAN_OK)
 
-        # ── Phân biệt LÊN xe vs XUỐNG xe ───────────────────
-        # Nếu học sinh đã boarded hôm nay và chưa alighted
-        # → đây là lượt xuống xe (chỉ cần RFID, không cần face)
-        # Nếu chưa boarded → flow lên xe (face pending)
+        # If student already boarded today → this scan means alighting (RFID only, no face needed)
+        # If not boarded yet → boarding flow (wait for face match)
         alight_result = self.att_db.mark_alighted(
             uid_hex,
             min_board_seconds=MIN_BOARD_SECONDS,
@@ -452,17 +425,15 @@ class AttendanceSystem:
             self._record_alighted(uid_hex, full_name, class_name)
             return
         elif alight_result == -1:
-            # Vừa lên xe, quẹt thẻ xuống quá sớm → bỏ qua
-            print(f"  [RFID] {full_name} — quẹt thẻ xuống xe quá sớm, bỏ qua")
+            # Scanned too soon after boarding — ignore
+            print(f"  [RFID] {full_name} — alighted too soon after boarding, ignored")
             return
 
-        # alight_result == 0 → chưa boarded → flow lên xe: đưa vào rfid_pending chờ face
+        # alight_result == 0 → not yet boarded → boarding flow: wait for face
         self._rfid_pending[(full_name, class_name)] = now
-        print(f"  [RFID] {full_name} ({class_name}) — chờ xác thực mặt")
+        print(f"  [RFID] {full_name} ({class_name}) — waiting for face verification")
 
-    # ══════════════════════════════════════════════════════
-    # 2-FACTOR CONFIRM
-    # ══════════════════════════════════════════════════════
+    # ── 2-factor confirm ──────────────────────────────────
 
     def _try_confirm(self, frame_bgr: np.ndarray):
         now = time.time()
@@ -511,7 +482,7 @@ class AttendanceSystem:
             if self._confirm_tracker[full_key] < CONFIRM_FRAMES:
                 continue
 
-            # Kiểm tra học sinh đã lên xe chưa để quyết định boarding hay alighting
+            # Check if student has boarded to decide boarding vs alighting
             uid = self._get_uid_by_name(info["full_name"], info["class_name"])
             alight_result = self.att_db.mark_alighted(
                 uid,
@@ -524,20 +495,17 @@ class AttendanceSystem:
             self._master_mode = False
 
             if alight_result == 1:
-                # Đã lên xe đủ lâu → ghi xuống xe
                 self._record_alighted(uid, info["full_name"], info["class_name"])
             elif alight_result == -1:
-                # Vừa lên xe, chưa đủ thời gian
-                print(f"  [MASTER] {info['full_name']} — vừa lên xe, chưa đủ thời gian xuống")
+                print(f"  [MASTER] {info['full_name']} — boarded too recently to alight")
                 self.stm32.send_play_audio(TRACK_FACE_MISMATCH)
             else:
-                # Chưa lên xe → ghi lên xe
                 self._record_attendance(face_key, frame_bgr, is_master=True)
             break
 
     @staticmethod
     def _current_session() -> str:
-        """Trả về 'morning' hoặc 'afternoon' dựa theo giờ hiện tại."""
+        """Return 'morning' or 'afternoon' based on current hour."""
         import datetime
         return "morning" if datetime.datetime.now().hour < MORNING_END_HOUR else "afternoon"
 
@@ -561,7 +529,6 @@ class AttendanceSystem:
 
         self.stm32.send_play_audio(TRACK_AUTH_OK)
 
-        # Cloud Sync push boarded (chạy trong thread riêng)
         if self._cloud:
             student_id = self.att_db.get_student_firebase_id(uid)
             date_str   = self.att_db.get_today_date_only()
@@ -585,13 +552,12 @@ class AttendanceSystem:
             ).start()
 
     def _record_alighted(self, uid_hex: str, full_name: str, class_name: str):
-        """Ghi log xuống xe + push Cloud (gọi từ _handle_rfid thread)."""
+        """Record alighting event and push to cloud (called from RFID handler thread)."""
         ts = time.strftime("%H:%M:%S")
         session = self._current_session()
         print(f"  ✓ XUỐNG XE [{session}]: {full_name} | lớp {class_name} | {ts}")
         self.stm32.send_play_audio(TRACK_AUTH_OK)
 
-        # Cloud Sync push alighted (chạy trong thread riêng)
         if self._cloud:
             student_id = self.att_db.get_student_firebase_id(uid_hex)
             date_str   = self.att_db.get_today_date_only()
@@ -615,9 +581,7 @@ class AttendanceSystem:
                 daemon=True,
             ).start()
 
-    # ══════════════════════════════════════════════════════
-    # DISPLAY STATE
-    # ══════════════════════════════════════════════════════
+    # ── Display state ─────────────────────────────────────
 
     def _update_display_status(self, now: float):
         if self._master_mode:
@@ -678,9 +642,7 @@ class AttendanceSystem:
                 "score": score, "uid": "", "ts": "",
             }
 
-    # ══════════════════════════════════════════════════════
-    # HELPERS
-    # ══════════════════════════════════════════════════════
+    # ── Helpers ───────────────────────────────────────────
 
     def _update_fps(self):
         self._fps_counter += 1
@@ -703,9 +665,7 @@ class AttendanceSystem:
                 return ts
         return ""
 
-    # ══════════════════════════════════════════════════════
-    # CLEANUP & SUMMARY
-    # ══════════════════════════════════════════════════════
+    # ── Cleanup & summary ─────────────────────────────────
 
     def _cleanup(self):
         if self.stm32:
@@ -715,7 +675,7 @@ class AttendanceSystem:
         if self.cam_thread: self.cam_thread.stop()
         if self._picam2:    self._picam2.stop()
         if self._display:   self._display.quit()
-        # att_db.close() KHÔNG gọi ở đây — gọi ở cuối _print_summary
+        # att_db.close() is called at the end of _print_summary, not here
 
     def _print_summary(self):
         print("\n" + "=" * 55)
@@ -740,6 +700,5 @@ class AttendanceSystem:
             print(f"STM32   : rx_ok={self.stm32.pkts_rx_ok} "
                   f"rx_err={self.stm32.pkts_rx_err} "
                   f"tx={self.stm32.pkts_tx}")
-        # Đóng DB sau khi đọc xong
         if self.att_db:
             self.att_db.close()

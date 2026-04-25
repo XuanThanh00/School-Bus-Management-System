@@ -9,7 +9,7 @@ from picamera2 import Picamera2
 
 
 class CameraThread:
-    """Capture frame BGR liên tục từ Picamera2 trên thread riêng."""
+    """Continuously capture BGR frames from Picamera2 in a background thread."""
 
     def __init__(self, picam2: Picamera2):
         self._picam2 = picam2

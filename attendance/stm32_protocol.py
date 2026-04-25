@@ -1,11 +1,11 @@
 """
 attendance/stm32_protocol.py
 
-Giao tiếp UART giữa Raspberry Pi 5 và STM32F103C8T6.
+UART communication between Raspberry Pi 5 and STM32F103C8T6.
 Packet format: [0xAA][LEN][CMD][PAYLOAD 0..15B][CRC8]
 CRC8 = XOR(LEN, CMD, payload bytes)
 
-Chạy độc lập để test handshake:
+Standalone handshake test:
     python -m attendance.stm32_protocol
 """
 
@@ -53,17 +53,17 @@ _MAX_PAYLOAD   = 15
 
 class STM32Protocol:
     """
-    Quản lý toàn bộ giao tiếp UART với STM32.
+    Manages all UART communication with STM32.
 
-    Callbacks (set sau khi khởi tạo hoặc truyền vào constructor):
-        on_rfid(uid_hex: str)                        — nhận UID thẻ, vd "FF8E4C1E"
-        on_gps(lat: float, lon: float, speed: float)  — nhận tọa độ + tốc độ GPS
-        on_gps_no_fix(sat_count: int)                 — GPS chưa có fix
-        on_hb_stm32(flags: int)                       — heartbeat STM32
-        on_ready()                                    — STM32 init xong, gửi ACK
-        on_ack(cmd_acked: int)                        — STM32 ACK lệnh của Pi
+    Callbacks (set at init or via constructor):
+        on_rfid(uid_hex: str)                        — RFID card scanned, e.g. "FF8E4C1E"
+        on_gps(lat: float, lon: float, speed: float)  — GPS coordinates + speed
+        on_gps_no_fix(sat_count: int)                 — GPS no fix
+        on_hb_stm32(flags: int)                       — STM32 heartbeat
+        on_ready()                                    — STM32 initialized, ACK sent
+        on_ack(cmd_acked: int)                        — STM32 ACKed a Pi command
 
-    Thread: RX chạy trong daemon thread riêng, TX dùng lock.
+    RX runs in a daemon thread; TX uses a lock.
     """
 
     def __init__(self,
@@ -79,7 +79,7 @@ class STM32Protocol:
 
         self._port       = port
         self._baud       = baud
-        self._reset_gpio = reset_gpio   # GPIO Pi → NRST STM32 (None = chưa nối)
+        self._reset_gpio = reset_gpio   # GPIO Pi → NRST STM32 (None = not wired)
 
         # Callbacks
         self.on_rfid       = on_rfid
@@ -107,7 +107,7 @@ class STM32Protocol:
         self.pkts_rx_err = 0
         self.pkts_tx     = 0
 
-        # GPIO cho reset STM32
+        # GPIO for STM32 hardware reset
         self._gpio_chip = None
         self._gpio_line = None
         self._last_reset_time = 0.0
@@ -115,7 +115,7 @@ class STM32Protocol:
     # ── PUBLIC: open / close ──────────────────────────────────
 
     def open(self):
-        """Mở serial port và bắt đầu RX thread."""
+        """Open serial port and start RX thread."""
         self._ser = serial.Serial(
             port=self._port,
             baudrate=self._baud,
@@ -127,12 +127,12 @@ class STM32Protocol:
         # Setup GPIO reset nếu có
         if self._reset_gpio is not None:
             try:
-                self._gpio_chip = gpiod.Chip('gpiochip4')   # Pi 5 dùng gpiochip4
+                self._gpio_chip = gpiod.Chip('gpiochip4')   # Pi 5 uses gpiochip4
                 self._gpio_line = self._gpio_chip.get_line(self._reset_gpio)
                 self._gpio_line.request(
                     consumer='stm32_reset',
                     type=gpiod.LINE_REQ_DIR_OUT,
-                    default_vals=[1]   # HIGH = không reset
+                    default_vals=[1]   # HIGH = not in reset
                 )
                 logger.info(f"GPIO{self._reset_gpio} ready for STM32 reset")
             except Exception as e:
@@ -149,7 +149,7 @@ class STM32Protocol:
         logger.info(f"STM32Protocol opened on {self._port} @ {self._baud}")
 
     def close(self):
-        """Dừng RX thread và đóng serial."""
+        """Stop RX thread and close serial."""
         self._running = False
         if self._rx_thread:
             self._rx_thread.join(timeout=2.0)
@@ -185,7 +185,7 @@ class STM32Protocol:
         logger.info("→ SHUTDOWN sent to STM32")
 
     def reset_stm32(self):
-        """Kéo NRST STM32 xuống GND 100ms để hard reset."""
+        """Pull NRST low for 100 ms to hard-reset the STM32."""
         if self._gpio_line is None:
             logger.warning("reset_stm32: GPIO not configured")
             return
@@ -228,7 +228,7 @@ class STM32Protocol:
         logger.debug("RX thread started")
         while self._running:
             try:
-                data = self._ser.read(64)   # non-blocking với timeout=1s
+                data = self._ser.read(64)   # non-blocking with timeout=1s
                 for b in data:
                     self._process_byte(b)
             except serial.SerialException as e:
@@ -250,7 +250,7 @@ class STM32Protocol:
                 self.pkts_rx_err += 1
                 return
             self._pkt_len = b
-            self._pkt_crc = b           # CRC bắt đầu với LEN
+            self._pkt_crc = b           # CRC accumulator starts with LEN
             self._state   = _S_CMD
 
         elif self._state == _S_CMD:
@@ -290,13 +290,13 @@ class STM32Protocol:
 
             elif cmd == CMD_GPS_DATA:
                 if len(payload) >= 12:
-                    # Format mới: lat + lon + speed_kmh (3 floats LE)
+                    # new format: lat + lon + speed_kmh (3 × float32 LE)
                     lat, lon, speed = struct.unpack_from('<fff', payload, 0)
                     logger.info(f"← GPS_DATA: {lat:.6f}, {lon:.6f}, {speed:.1f} km/h")
                     if self.on_gps:
                         self.on_gps(lat, lon, speed)
                 elif len(payload) >= 8:
-                    # Legacy 8B (firmware cũ, backward compat)
+                    # legacy 8 B payload (old firmware, backward compat)
                     lat, lon = struct.unpack_from('<ff', payload, 0)
                     logger.info(f"← GPS_DATA (legacy): {lat:.6f}, {lon:.6f}")
                     if self.on_gps:
@@ -315,7 +315,7 @@ class STM32Protocol:
                 logger.debug(f"← HB_STM32: flags=0b{flags:08b}")
                 if self.on_hb_stm32:
                     self.on_hb_stm32(flags)
-                # Không ACK HB để tránh spam
+                # No ACK for HB — avoid traffic spam
 
             elif cmd == CMD_READY:
                 logger.info("← READY from STM32")
@@ -337,8 +337,8 @@ class STM32Protocol:
 
 
 # ── STANDALONE TEST ───────────────────────────────────────────
-# Chạy: python -m attendance.stm32_protocol
-# Mục đích: test handshake + HB 2 chiều, không cần camera/core.py
+# Run: python -m attendance.stm32_protocol
+# Purpose: test two-way handshake + HB without camera/core.py
 
 if __name__ == "__main__":
     import sys
@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
     # Tracking state
     handshake_done = threading.Event()
-    last_hb_stm32  = [0.0]   # dùng list để mutate trong closure
+    last_hb_stm32  = [0.0]   # list so the closure can mutate it
 
     def on_ready():
         print("✓ STM32 READY — handshake starting")
@@ -397,7 +397,7 @@ if __name__ == "__main__":
     proto.open()
     print("Waiting for STM32 READY (up to 30s)...")
 
-    # Gửi HB_PI định kỳ
+    # Periodic HB_PI sender
     def hb_loop():
         while True:
             time.sleep(5)
@@ -409,7 +409,7 @@ if __name__ == "__main__":
     try:
         while True:
             time.sleep(1)
-            # Cảnh báo nếu STM32 im lặng quá 15s
+            # Warn if STM32 has been silent for more than 15 s
             if handshake_done.is_set():
                 silent = time.time() - last_hb_stm32[0]
                 if silent > 15:

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # ══════════════════════════════════════════════════════════
-# watchdog.py — Chạy độc lập trên Pi 5 qua systemd
+# watchdog.py — runs independently on Pi 5 via systemd
 #
-# Nhiệm vụ DUY NHẤT: feed /dev/watchdog khi main.py còn sống.
-# UART STM32 do main.py quản lý hoàn toàn — watchdog không đụng vào.
+# Single purpose: feed /dev/watchdog while main.py is alive.
+# UART/STM32 is managed entirely by main.py — watchdog does not touch it.
 #
 # Flow:
-#   Pi boot → watchdog.py start → mở /dev/watchdog
-#   main.py start → gửi "START\n" → bắt đầu feed watchdog
-#   main.py gửi "HB\n" mỗi 3s → watchdog feed /dev/watchdog mỗi 5s
-#   main.py tắt → gửi "SHUTDOWN\n" → watchdog đóng /dev/watchdog an toàn
-#   main.py treo → timeout 15s → /dev/watchdog không được feed → Pi reboot
+#   Pi boot → watchdog.py start → open /dev/watchdog
+#   main.py start → send "START\n" → begin feeding
+#   main.py sends "HB\n" every 3s → watchdog feeds /dev/watchdog every 5s
+#   main.py exit → send "SHUTDOWN\n" → watchdog closes /dev/watchdog safely
+#   main.py hangs → 15s timeout → /dev/watchdog not fed → Pi reboots
 # ══════════════════════════════════════════════════════════
 
 import socket
@@ -21,8 +21,8 @@ import sys
 
 # ── Config ─────────────────────────────────────────────────
 HB_SOCKET         = "/tmp/watchdog.sock"
-HB_TIMEOUT        = 15.0      # giây không nhận HB từ main.py → ngừng feed
-WDT_FEED_INTERVAL = 5.0       # giây giữa 2 lần feed /dev/watchdog
+HB_TIMEOUT        = 15.0      # seconds without HB from main.py → stop feeding
+WDT_FEED_INTERVAL = 5.0       # seconds between /dev/watchdog feeds
 LOG_FILE          = "/tmp/watchdog.log"
 LINUX_WDT_PATH    = "/dev/watchdog"
 
@@ -81,7 +81,7 @@ def _close_wdt_safe():
 
 
 # ══════════════════════════════════════════════════════════
-# THREAD: Unix socket — nhận tín hiệu từ main.py
+# THREAD: Unix socket — receive signals from main.py
 # ══════════════════════════════════════════════════════════
 def socket_server():
     global state, last_hb_from_main
@@ -161,7 +161,7 @@ def main():
                 log(f"⚠ main.py timeout {elapsed:.0f}s — dừng feed watchdog")
             main_was_alive = alive
 
-            # Feed /dev/watchdog chỉ khi main.py còn sống
+            # Feed /dev/watchdog only while main.py is alive
             if alive and (now - last_wdt_feed >= WDT_FEED_INTERVAL):
                 _feed_wdt()
                 last_wdt_feed = now

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Hệ thống điểm danh học sinh — Raspberry Pi 5
-Chạy: python main.py
+Student attendance system — Raspberry Pi 5
+Run: python main.py
 """
 import signal
 import socket
@@ -11,7 +11,7 @@ import time
 
 # ── Watchdog config ────────────────────────────────────────
 HB_SOCKET   = "/tmp/watchdog.sock"
-HB_INTERVAL = 3.0          # giây giữa mỗi heartbeat
+HB_INTERVAL = 3.0          # seconds between heartbeats
 
 
 # ══════════════════════════════════════════════════════════
@@ -19,20 +19,20 @@ HB_INTERVAL = 3.0          # giây giữa mỗi heartbeat
 # ══════════════════════════════════════════════════════════
 
 def _wd_send(msg: str):
-    """Gửi một message tới watchdog.py qua Unix socket (fire-and-forget)."""
+    """Send a message to watchdog.py via Unix socket (fire-and-forget)."""
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(2.0)
             s.connect(HB_SOCKET)
             s.sendall(msg.encode())
     except (ConnectionRefusedError, FileNotFoundError):
-        pass    # watchdog chưa chạy — bỏ qua
+        pass    # watchdog not running yet — ignore
     except Exception as e:
         print(f"[WD] {e}")
 
 
 def _heartbeat_loop():
-    """Daemon thread: gửi HB mỗi HB_INTERVAL giây."""
+    """Daemon thread: send HB every HB_INTERVAL seconds."""
     while True:
         _wd_send("HB\n")
         time.sleep(HB_INTERVAL)
@@ -59,7 +59,7 @@ def main():
     from attendance import AttendanceSystem
     system = AttendanceSystem()
 
-    # Graceful shutdown khi nhận SIGTERM (systemd stop) hoặc SIGINT (Ctrl+C)
+    # Graceful shutdown on SIGTERM (systemd) or SIGINT (Ctrl+C)
     def _on_signal(sig, frame):
         print(f"\n[main] Nhận signal {sig} → dừng hệ thống...")
         system.stop()

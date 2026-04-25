@@ -1,11 +1,11 @@
 # ══════════════════════════════════════════════════════════
 # attendance/display.py
-# Pygame UI cho màn hình xe buýt
+# Pygame UI for the bus attendance screen
 # Layout:
-#   Trái  : Camera feed + bounding box + score
-#   Phải  : Card FACE (trên) + Card RFID (dưới) + Counter + Log
-#   Header: Tên hệ thống + giờ
-#   Footer: GPS + tuyến xe
+#   Left  : Camera feed + bounding box + score
+#   Right : Card FACE (top) + Card RFID (bottom) + Counter + Log
+#   Header: System name + clock
+#   Footer: GPS + route
 # ══════════════════════════════════════════════════════════
 
 import pygame
@@ -14,7 +14,7 @@ import cv2
 import time
 import os
 
-# ── Màu sắc ────────────────────────────────────────────────
+# ── Colors ─────────────────────────────────────────────────
 BG_MAIN       = (13,  13,  30)
 BG_HEADER     = (15,  52,  96)
 BG_FOOTER     = (10,  10,  10)
@@ -56,11 +56,11 @@ FPS_CAP    = 30
 
 class BusDisplay:
     """
-    Pygame UI cho hệ thống điểm danh xe buýt.
-    Hiện đồng thời:
-      - Card FACE: kết quả nhận diện khuôn mặt
-      - Card RFID: thẻ vừa quẹt
-      - Bounding box + score trực tiếp trên camera feed
+    Pygame UI for the bus attendance system.
+    Displays simultaneously:
+      - Card FACE: face recognition result
+      - Card RFID: last scanned card
+      - Bounding box + score overlaid on the camera feed
     """
 
     def __init__(self, route: str = "TUYEN 01", fullscreen: bool = False):
@@ -100,7 +100,7 @@ class BusDisplay:
         self._rfid_name      = ""
         self._rfid_class     = ""
         self._rfid_uid       = ""
-        self._rfid_ts        = 0.0    # timestamp lần quẹt cuối
+        self._rfid_ts        = 0.0    # last scan timestamp
         self._attendance     = 0
         self._total          = 0
         self._fps            = 0.0
@@ -133,7 +133,7 @@ class BusDisplay:
                rfid_ok:       bool  = True,
                cam_ok:        bool  = True,
                last_log:      list  = None) -> bool:
-        """Vẽ 1 frame. Trả về False nếu người dùng thoát."""
+        """Render one frame. Returns False if the user quits."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
@@ -241,12 +241,12 @@ class BusDisplay:
         # Dot indicator
         pygame.draw.circle(s, lbl_color, (x + pad - 6 + lbl.get_width() + 14, y + 14), 4)
 
-        # Tên
+        # Name
         name = (self._face_name[:16] if self._face_name else "---")
         nm = self._font_lg.render(name, True, COLOR_WHITE)
         s.blit(nm, (x + pad, y + 26))
 
-        # Lớp + ts
+        # Class + timestamp
         if self._face_class:
             sub = f"Lop {self._face_class}"
             if self._face_ts:

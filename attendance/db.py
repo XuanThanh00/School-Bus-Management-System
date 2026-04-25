@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════
 # attendance/db.py
-# SQLite layer — thay thế AttendanceLogger + registered_uids.txt
-# WAL mode: an toàn khi mất điện, concurrent read OK
+# SQLite layer — replaces AttendanceLogger + registered_uids.txt
+# WAL mode: safe on power loss, concurrent reads OK
 # ══════════════════════════════════════════════════════════
 
 import os
@@ -18,19 +18,19 @@ from .config import DB_SQLITE, STUDENT_IMG_DIR
 
 class AttendanceDB:
     """
-    Quản lý toàn bộ dữ liệu qua SQLite (WAL mode).
+    Manages all data via SQLite (WAL mode).
 
-    Bảng:
-      students            — danh sách học sinh + UID thẻ
-      attendance_sessions — 1 session/ngày
-      attendance_records  — bản ghi điểm danh (upsert-safe)
+    Tables:
+      students            — student list + RFID UIDs
+      attendance_sessions — one session per day
+      attendance_records  — attendance entries (upsert-safe)
 
     Public API:
-      ensure_students(records)     — sync danh sách học sinh
+      ensure_students(records)     — sync student list
       get_uid_map()                → dict uid_hex → record
-      get_today_session_id()       → session_id (tạo nếu chưa có)
+      get_today_session_id()       → session_id (creates if absent)
       mark_present(...)            → evidence_path
-      get_rows()                   → list[dict] để _print_summary
+      get_rows()                   → list[dict] for _print_summary
       get_attendance_count()       → (present, total)
       register_uid(full_name, class_name, uid)
       get_all_students()           → list[dict]
@@ -45,7 +45,7 @@ class AttendanceDB:
         os.makedirs(img_dir, exist_ok=True)
         self._conn = self._connect()
         self._create_tables()
-        self._session_id: int | None = None   # cache session hiện tại
+        self._session_id: int | None = None   # cached session id
 
     # ── Connection ─────────────────────────────────────────
 
@@ -53,7 +53,7 @@ class AttendanceDB:
         conn = sqlite3.connect(
             self.db_path,
             check_same_thread=False,
-            isolation_level=None,     # autocommit — dùng BEGIN explicit
+            isolation_level=None,     # autocommit — use explicit BEGIN
         )
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL")
@@ -134,7 +134,7 @@ class AttendanceDB:
     # ══════════════════════════════════════════════════════
 
     def get_today_session_id(self) -> int:
-        """Lấy session hôm nay, tạo mới nếu chưa có. Kết quả được cache."""
+        """Get today's session ID, creating it if absent. Result is cached."""
         if self._session_id is not None:
             return self._session_id
 
@@ -156,12 +156,12 @@ class AttendanceDB:
         return self._session_id
 
     def get_today_date_str(self) -> str:
-        """Trả về chuỗi format YYYY-MM-DD_AM hoặc YYYY-MM-DD_PM (dùng cho SQLite session)."""
+        """Return YYYY-MM-DD_AM or YYYY-MM-DD_PM string for the SQLite session."""
         suffix = "AM" if time.localtime().tm_hour < 12 else "PM"
         return f"{time.strftime('%Y-%m-%d')}_{suffix}"
 
     def get_today_date_only(self) -> str:
-        """Trả về chuỗi format YYYY-MM-DD (dùng làm doc_id prefix trong Firestore)."""
+        """Return YYYY-MM-DD string used as the Firestore doc ID prefix."""
         return time.strftime('%Y-%m-%d')
 
     # ══════════════════════════════════════════════════════
@@ -170,8 +170,8 @@ class AttendanceDB:
 
     def ensure_students(self, uid_records: list[dict]):
         """
-        Gọi lúc khởi động: đảm bảo mọi học sinh trong uid_records
-        đều có dòng trong bảng students.
+        Called at startup: ensure every student in uid_records
+        has a row in the students table.
 
         uid_records: list of {"full_name", "class_name", "uid"}
         """
@@ -183,7 +183,7 @@ class AttendanceDB:
             uid        = rec["uid"].upper()
             student_id = rec.get("student_id")
 
-            # Upsert student — COALESCE giữ student_id cũ nếu giá trị mới là NULL
+            # Upsert — COALESCE keeps existing student_id if new value is NULL
             self._conn.execute("""
                 INSERT INTO students (full_name, class_name, uid, student_id)
                 VALUES (?, ?, ?, ?)
@@ -193,12 +193,12 @@ class AttendanceDB:
                     student_id = COALESCE(excluded.student_id, student_id)
             """, (full_name, class_name, uid, student_id))
 
-            # Lấy internal sid của SQLite
+            # Get internal SQLite student ID
             sid = self._conn.execute(
                 "SELECT id FROM students WHERE uid = ?", (uid,)
             ).fetchone()["id"]
 
-            # Tạo attendance_record trạng thái vắng nếu chưa có
+            # Create absent attendance record if not yet present
             self._conn.execute("""
                 INSERT OR IGNORE INTO attendance_records (session_id, student_id, status)
                 VALUES (?, ?, 0)
@@ -207,16 +207,14 @@ class AttendanceDB:
         print(f"  ✓ Đồng bộ {len(uid_records)} học sinh vào DB")
 
     def get_all_students(self) -> list[dict]:
-        """Trả về tất cả học sinh."""
+        """Return all students."""
         rows = self._conn.execute(
             "SELECT id, full_name, class_name, uid, student_id FROM students ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
 
     def register_uid(self, full_name: str, class_name: str, uid: str):
-        """
-        Upsert từ save_uid.py — thêm hoặc cập nhật học sinh theo UID.
-        """
+        """Upsert called from save_uid.py — add or update a student by UID."""
         uid = uid.strip().upper()
         existing = self._conn.execute(
             "SELECT full_name, class_name FROM students WHERE uid = ?", (uid,)
@@ -262,7 +260,7 @@ class AttendanceDB:
         }
 
     # ══════════════════════════════════════════════════════
-    # ĐIỂM DANH
+    # ATTENDANCE
     # ══════════════════════════════════════════════════════
 
     def mark_present(self, full_name: str, class_name: str,
@@ -270,20 +268,20 @@ class AttendanceDB:
                      gps_lat: float = None,
                      gps_lon: float = None) -> str:
         """
-        Lưu ảnh minh chứng + upsert attendance_record → status=1.
-        Trả về absolute path ảnh.
-        frame_bgr: BGR frame — cv2.imwrite nhận BGR sẵn.
-        gps_lat/lon: tọa độ GPS lúc điểm danh (None nếu chưa có fix).
+        Save evidence image + upsert attendance_record → status=1.
+        Returns absolute path to the saved image.
+        frame_bgr: BGR frame from CameraThread — cv2.imwrite accepts BGR directly.
+        gps_lat/lon: GPS coordinates at check-in time (None if no fix).
         """
         session_id = self.get_today_session_id()
         ts         = time.strftime("%H:%M:%S")
 
-        # Lưu ảnh
+        # Save evidence image
         img_filename = f"{full_name.replace(' ', '')}_{ts.replace(':', '')}.jpg"
         img_path     = os.path.abspath(os.path.join(self.img_dir, img_filename))
         cv2.imwrite(img_path, frame_bgr)
 
-        # Tìm student_id
+        # Look up internal student ID
         uid = uid.upper() if uid else ""
         row = self._conn.execute(
             "SELECT id FROM students WHERE uid = ?", (uid,)
@@ -296,7 +294,7 @@ class AttendanceDB:
             ).fetchone()
 
         if row is None:
-            # Edge case: học sinh chưa tồn tại → tạo mới
+            # Edge case: student not found → insert
             cur = self._conn.execute(
                 "INSERT INTO students (full_name, class_name, uid) VALUES (?, ?, ?)",
                 (full_name, class_name, uid or None)
@@ -309,7 +307,7 @@ class AttendanceDB:
         else:
             student_id = row["id"]
 
-        # Upsert → status=1, ghi GPS nếu có
+        # Upsert → status=1, include GPS if available
         self._conn.execute("""
             INSERT INTO attendance_records
                 (session_id, student_id, status, checked_at, evidence_path, gps_lat, gps_lon)
@@ -332,11 +330,11 @@ class AttendanceDB:
                       gps_lat: float = None,
                       gps_lon: float = None) -> int:
         """
-        Ghi giờ xuống xe vào attendance_record đã boarded hôm nay.
-        Trả về:
-           1  → xuống xe thành công
-           0  → chưa lên xe (hoặc đã xuống rồi)
-          -1  → vừa lên xe, chưa đủ min_board_seconds
+        Record alighting time for a student who boarded today.
+        Returns:
+           1  → alighted successfully
+           0  → not boarded (or already alighted)
+          -1  → boarded too recently (min_board_seconds not elapsed)
         """
         uid = uid.upper() if uid else ""
         if not uid:
@@ -356,9 +354,9 @@ class AttendanceDB:
         """, (uid, session_id)).fetchone()
 
         if row is None:
-            return 0   # chưa boarded hoặc đã alighted rồi
+            return 0   # not boarded or already alighted
 
-        # Kiểm tra thời gian tối thiểu kể từ lúc lên xe
+        # Enforce minimum boarding duration
         if min_board_seconds > 0 and row["checked_at"]:
             def _to_sec(t: str) -> int:
                 h, m, s = t.split(":")
@@ -381,10 +379,7 @@ class AttendanceDB:
         return 1
 
     def get_student_firebase_id(self, uid: str) -> str | None:
-        """
-        Trả về student_id Firebase (vd 'hs001') theo uid thẻ.
-        Trả về None nếu không tìm thấy hoặc chưa sync.
-        """
+        """Return Firebase student_id (e.g. 'hs001') for the given UID, or None."""
         uid = uid.upper() if uid else ""
         row = self._conn.execute(
             "SELECT student_id FROM students WHERE uid = ?", (uid,)
@@ -392,11 +387,7 @@ class AttendanceDB:
         return row[0] if row else None
 
     def update_student_id(self, uid: str, student_id: str) -> bool:
-        """
-        Cập nhật student_id Firebase cho học sinh theo uid thẻ.
-        Gọi sau khi fetch danh sách users từ Firebase.
-        Trả về True nếu cập nhật thành công.
-        """
+        """Update Firebase student_id by UID. Returns True if updated."""
         uid = uid.upper() if uid else ""
         cur = self._conn.execute(
             "UPDATE students SET student_id=? WHERE uid=?",
@@ -405,10 +396,7 @@ class AttendanceDB:
         return cur.rowcount > 0
 
     def update_student_id_by_name(self, full_name: str, student_id: str) -> bool:
-        """
-        Cập nhật student_id Firebase theo tên học sinh.
-        Dùng khi Firebase users dùng studentName để match.
-        """
+        """Update Firebase student_id by name. Returns True if updated."""
         cur = self._conn.execute(
             "UPDATE students SET student_id=? WHERE full_name=?",
             (student_id, full_name)
@@ -416,7 +404,7 @@ class AttendanceDB:
         return cur.rowcount > 0
 
     def get_students_missing_firebase_id(self) -> list[dict]:
-        """Trả về học sinh chưa có student_id (chưa sync từ Firebase)."""
+        """Return students without a Firebase student_id."""
         rows = self._conn.execute(
             "SELECT uid, full_name, class_name FROM students "
             "WHERE student_id IS NULL OR student_id = '' "
@@ -426,7 +414,7 @@ class AttendanceDB:
 
     def get_boarded_students_today(self) -> list[dict]:
         """
-        Trả về list học sinh đã lên xe hôm nay (status=1).
+        Return students who boarded today (status=1).
         Keys: uid, student_id, full_name, class_name,
               checked_at, gps_lat, gps_lon,
               alighted_at, alighted_lat, alighted_lon
@@ -448,7 +436,7 @@ class AttendanceDB:
 
     def get_rows(self) -> list[dict]:
         """
-        Trả về list[dict] để _print_summary dùng.
+        Return list[dict] for _print_summary.
         Keys: FullName, Class, UID, Status, Time, Evidence, GpsLat, GpsLon
         """
         session_id = self.get_today_session_id()
@@ -482,7 +470,7 @@ class AttendanceDB:
         ]
 
     def get_attendance_count(self) -> tuple[int, int]:
-        """Trả về (present, total) cho session hôm nay."""
+        """Return (present, total) for today's session."""
         session_id = self.get_today_session_id()
         total   = self._conn.execute(
             "SELECT COUNT(*) FROM students WHERE uid IS NOT NULL"

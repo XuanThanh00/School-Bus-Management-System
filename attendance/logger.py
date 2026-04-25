@@ -11,16 +11,16 @@ from .config import ATTENDANCE_FILE, STUDENT_IMG_DIR, UID_FILE
 
 class AttendanceLogger:
     """
-    Quản lý file điểm danh .txt và lưu ảnh minh chứng.
+    Manages the attendance .txt file and evidence images.
 
-    Format mỗi dòng:
+    Line format:
       FullName,Class,UID,Status,Time,EvidencePath
 
-    - Status  : 1 = có mặt, 0 = vắng
-    - Time    : HH:MM:SS khi điểm danh, rỗng nếu vắng
-    - Evidence: absolute path ảnh, rỗng nếu vắng
+    - Status  : 1 = present, 0 = absent
+    - Time    : HH:MM:SS at check-in, empty if absent
+    - Evidence: absolute image path, empty if absent
 
-    Upsert theo FullName — chạy lại không tạo dòng trùng.
+    Upsert by FullName — re-running does not create duplicate rows.
     """
 
     SEP = ","
@@ -43,7 +43,7 @@ class AttendanceLogger:
                     if not line:
                         continue
                     parts = line.split(self.SEP, 5)
-                    # pad đủ 6 cột nếu dòng cũ thiếu
+                    # pad to 6 columns for backward compat
                     while len(parts) < 6:
                         parts.append("")
                     self._rows.append({
@@ -66,8 +66,8 @@ class AttendanceLogger:
 
     def ensure_students(self, uid_records: list[dict]):
         """
-        Gọi lúc khởi động: đảm bảo mọi học sinh trong uid_records
-        đều có dòng trong file (Status=0). Nếu đã có thì giữ nguyên.
+        Called at startup: ensure every student in uid_records
+        has a row in the file (Status=0). Existing rows are preserved.
 
         uid_records: list of {"full_name", "class_name", "uid"}
         """
@@ -91,10 +91,10 @@ class AttendanceLogger:
     def mark_present(self, full_name: str, class_name: str,
                      uid: str, frame_bgr) -> str:
         """
-        Lưu ảnh minh chứng + upsert dòng điểm danh.
-        Tên ảnh: HoTenKhongDau_HHMMSS.jpg
-        Trả về absolute path ảnh.
-        frame_bgr: BGR frame trực tiếp từ CameraThread — cv2.imwrite nhận BGR sẵn.
+        Save evidence image + upsert attendance row.
+        Image name: NameNoSpaces_HHMMSS.jpg
+        Returns absolute image path.
+        frame_bgr: BGR frame from CameraThread — cv2.imwrite accepts BGR directly.
         """
         ts           = time.strftime("%H:%M:%S")
         img_filename = f"{full_name.replace(' ', '')}_{ts.replace(':', '')}.jpg"
@@ -111,7 +111,7 @@ class AttendanceLogger:
                 self._flush()
                 return img_path
 
-        # chưa có dòng → thêm mới
+        # student not in file yet — insert
         self._rows.append({
             "FullName": full_name, "Class":    class_name,
             "UID":      uid,       "Status":   "1",

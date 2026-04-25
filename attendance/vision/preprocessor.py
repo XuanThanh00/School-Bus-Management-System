@@ -1,6 +1,6 @@
 # ══════════════════════════════════════════════════════════
 # attendance/vision/preprocessor.py
-# Tiền xử lý ảnh để thu hẹp quality gap giữa ảnh thẻ và live camera.
+# Image pre-processing to close the quality gap between ID photos and live camera.
 # ══════════════════════════════════════════════════════════
 
 import cv2
@@ -9,11 +9,11 @@ import numpy as np
 
 class ImagePreprocessor:
     """
-    Hai chiều xử lý bù trừ lẫn nhau:
-      process_id_photo   : ảnh thẻ sắc nét → blur nhẹ + normalize brightness
-                           (kéo embedding ảnh thẻ gần với embedding camera)
-      process_live_frame : frame camera mờ → CLAHE + bilateral + normalize
-                           (enhance lên gần với chất lượng ảnh thẻ)
+    Two complementary processing directions:
+      process_id_photo   : sharp ID photo → mild blur + brightness normalisation
+                           (pulls ID-photo embedding closer to live-camera embedding)
+      process_live_frame : blurry camera frame → CLAHE + bilateral + normalise
+                           (enhances toward ID-photo quality)
     """
 
     def __init__(self,
@@ -37,7 +37,7 @@ class ImagePreprocessor:
     # ── Public ─────────────────────────────────────────────
 
     def process_id_photo(self, img_bgr: np.ndarray) -> np.ndarray:
-        """Ảnh thẻ BGR → normalize brightness + Gaussian blur nhẹ."""
+        """ID photo BGR → normalise brightness + mild Gaussian blur."""
         lab       = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
         l, a, b   = cv2.split(lab)
         l         = self._normalize_brightness(l)
@@ -45,7 +45,7 @@ class ImagePreprocessor:
         return cv2.GaussianBlur(out, (3, 3), 0.5)
 
     def process_live_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
-        """Frame live BGR → bilateral + CLAHE + normalize brightness."""
+        """Live frame BGR → bilateral filter + CLAHE + brightness normalisation."""
         filtered  = cv2.bilateralFilter(frame_bgr, d=5,
                                         sigmaColor=50, sigmaSpace=50)
         lab       = cv2.cvtColor(filtered, cv2.COLOR_BGR2LAB)

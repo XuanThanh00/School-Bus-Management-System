@@ -13,51 +13,47 @@ class CloudSync:
         self.fs_db = None
         self.rt_db = None
         self.initialized = False
-        
+
         self._init_firebase()
 
     def _init_firebase(self):
         try:
             if not os.path.exists(self.service_account_path):
-                print(f"  [CLOUD] LỖI: Không tìm thấy {self.service_account_path}!")
-                print("  => Vui lòng tải file Private Key từ Firebase Console > Service Accounts")
+                print(f"  [CLOUD] ERROR: {self.service_account_path} not found!")
+                print("  => Download the Private Key from Firebase Console > Service Accounts")
                 return
 
             cred = credentials.Certificate(self.service_account_path)
-            # Khởi tạo App nếu chưa có
+            # Only initialize once per process
             if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred, {
-                    'databaseURL': self.database_url
-                })
+                firebase_admin.initialize_app(cred, {'databaseURL': self.database_url})
 
             self.fs_db = firestore.client()
             self.rt_db = rt_db_module
             self.initialized = True
-            print("  [CLOUD] ✓ Đã kết nối thành công Firebase Admin SDK (Firestore + RealtimeDB)!")
+            print("  [CLOUD] ✓ Firebase Admin SDK connected (Firestore + RealtimeDB)")
         except Exception as e:
-            print(f"  [CLOUD] Khởi tạo Firebase thất bại: {e}")
+            print(f"  [CLOUD] Firebase init failed: {e}")
 
-    # ══════════════════════════════════════════════════════
-    # THAO TÁC TRÊN FIRESTORE (DB TĨNH)
-    # ══════════════════════════════════════════════════════
-    
+    # ── Firestore ──────────────────────────────────────────
+
     def sync_students_to_pi(self, reference_dir: str,
                             existing_students: list = None) -> tuple[list, bool]:
         """
-        Kéo thông tin từ Firestore xuống.
-        - Bước 1: Fetch metadata nhẹ (không có imageData), so sánh với SQLite.
-        - Bước 2: Chỉ tải ảnh khi metadata thay đổi hoặc ảnh bị thiếu.
-        Trả về (synced_records, images_changed).
-        images_changed=True → caller cần xóa cache embedding và rebuild.
+        Pull student data from Firestore.
+        Step 1: fetch lightweight metadata (no imageData), compare with SQLite.
+        Step 2: download images only when metadata changed or images are missing.
+        Returns (synced_records, images_changed).
+        images_changed=True → caller should delete embedding cache and rebuild.
         """
         if not self.initialized:
             return [], False
 
-        print("  [CLOUD] Đang kiểm tra danh sách Học sinh từ Firestore...")
+        print("  [CLOUD] Checking student list from Firestore...")
         os.makedirs(reference_dir, exist_ok=True)
 
         try:
-            # ── Bước 1: Fetch metadata (bỏ qua imageData) ──────────────
+            # Step 1: fetch metadata without imageData
             meta_docs = list(
                 self.fs_db.collection("students")
                 .select(["name", "class", "rfidCardId", "studentId"])
@@ -81,7 +77,7 @@ class CloudSync:
                         "class_name": class_name,
                     })
 
-            # ── Bước 2: So sánh với SQLite ─────────────────────────────
+            # Step 2: compare with SQLite
             def _key_set(records):
                 return {(r.get("uid", "").upper(),
                          r.get("student_id") or "",
@@ -92,7 +88,6 @@ class CloudSync:
             firebase_set = _key_set(synced_records)
             sqlite_set   = _key_set(existing_students or [])
 
-            # Kiểm tra ảnh tham chiếu có đủ không
             images_present = all(
                 os.path.exists(os.path.join(
                     reference_dir,
@@ -102,13 +97,12 @@ class CloudSync:
             )
 
             if firebase_set == sqlite_set and images_present:
-                print(f"  [CLOUD] ✓ Dữ liệu không thay đổi "
-                      f"({len(synced_records)} học sinh) — bỏ qua tải ảnh.")
+                print(f"  [CLOUD] ✓ No changes ({len(synced_records)} students) — skip image download")
                 return synced_records, False
 
-            # ── Bước 3: Tải ảnh đầy đủ ────────────────────────────────
-            reason = "metadata thay đổi" if firebase_set != sqlite_set else "ảnh bị thiếu"
-            print(f"  [CLOUD] {reason} → đang tải ảnh...")
+            # Step 3: download full docs with images
+            reason = "metadata changed" if firebase_set != sqlite_set else "images missing"
+            print(f"  [CLOUD] {reason} → downloading images...")
 
             full_docs = self.fs_db.collection("students").stream()
             count = 0
@@ -126,7 +120,7 @@ class CloudSync:
                         filename   = f"{safe_name}_{class_name}.jpg"
                         filepath   = os.path.join(reference_dir, filename)
 
-                        # Xóa file cũ cùng người nhưng khác lớp
+                        # Remove stale files for the same person with a different class
                         for old_f in os.listdir(reference_dir):
                             stem  = os.path.splitext(old_f)[0]
                             parts = stem.split("_")
@@ -138,27 +132,24 @@ class CloudSync:
                         with open(filepath, "wb") as f:
                             f.write(img_bytes)
                     except Exception as e:
-                        print(f"    - Lỗi giải mã ảnh cho {name}: {e}")
+                        print(f"    - Image decode error for {name}: {e}")
                 count += 1
 
-            print(f"  [CLOUD] ✓ Đã đồng bộ {count} học sinh và ảnh tham chiếu.")
+            print(f"  [CLOUD] ✓ Synced {count} students and reference images")
             return synced_records, True
 
         except Exception as e:
-            print(f"  [CLOUD] Lỗi khi kéo Students: {e}")
+            print(f"  [CLOUD] Error pulling students: {e}")
             return [], False
 
     def reset_all_attendance_status(self):
-        """
-        Reset attendanceStatus → 'not_boarded' cho toàn bộ học sinh.
-        Gọi khi Pi khởi động / bắt đầu chuyến mới để web admin thấy đúng trạng thái.
-        """
+        """Reset attendanceStatus → 'not_boarded' for all students (called on trip start)."""
         if not self.initialized:
             return
         try:
             docs  = list(self.fs_db.collection("students").stream())
             count = 0
-            # Firestore batch giới hạn 500 op/lần
+            # Firestore batch limit: 500 ops per commit
             batch = self.fs_db.batch()
             for doc in docs:
                 batch.update(doc.reference, {"attendanceStatus": "not_boarded"})
@@ -168,12 +159,12 @@ class CloudSync:
                     batch = self.fs_db.batch()
             if count % 500 != 0:
                 batch.commit()
-            print(f"  [CLOUD] ✓ Reset attendanceStatus → not_boarded ({count} học sinh)")
+            print(f"  [CLOUD] ✓ Reset attendanceStatus → not_boarded ({count} students)")
         except Exception as e:
-            print(f"  [CLOUD] Lỗi reset attendanceStatus: {e}")
+            print(f"  [CLOUD] Error resetting attendanceStatus: {e}")
 
     def _update_student_status(self, student_id: str, status: str):
-        """Cập nhật attendanceStatus trong Firestore collection students."""
+        """Update attendanceStatus field in the students collection."""
         try:
             docs = (self.fs_db.collection("students")
                     .where("studentId", "==", student_id)
@@ -181,19 +172,19 @@ class CloudSync:
                     .stream())
             for doc in docs:
                 doc.reference.update({"attendanceStatus": status})
-                print(f"  [CLOUD] ✓ attendanceStatus={status} cho {student_id}")
+                print(f"  [CLOUD] ✓ attendanceStatus={status} for {student_id}")
                 return
-            print(f"  [CLOUD] ⚠ Không tìm thấy student {student_id}")
+            print(f"  [CLOUD] ⚠ Student {student_id} not found")
         except Exception as e:
-            print(f"  [CLOUD] Lỗi cập nhật attendanceStatus: {e}")
+            print(f"  [CLOUD] Error updating attendanceStatus: {e}")
 
     def push_attendance(self, doc_id: str, student_id: str, student_name: str,
                         date_str: str, ts: str, is_boarded: bool,
                         gps_lat: float, gps_lon: float, img_path: str = None):
         """
-        Cập nhật lên Firestore Collection `attendanceRecords`.
-        is_boarded=True  → Lên xe: ghi mới document, set attendanceStatus='boarded'.
-        is_boarded=False → Xuống xe: patch alightedAt, set attendanceStatus='arrived'.
+        Write to Firestore attendanceRecords collection.
+        is_boarded=True  → boarding: create document, set status='boarded'.
+        is_boarded=False → alighting: patch alightedAt fields, set status='arrived'.
         """
         if not self.initialized: return
 
@@ -234,10 +225,10 @@ class CloudSync:
                 self._update_student_status(student_id, "arrived")
 
         except Exception as e:
-            print(f"  [CLOUD] Lỗi Push Attendance: {e}")
+            print(f"  [CLOUD] Error pushing attendance: {e}")
 
     def send_fcm(self, student_id: str, title: str, body: str):
-        """Gửi FCM push notification tới phụ huynh của học sinh."""
+        """Send FCM push notification to the parent(s) of the given student."""
         if not self.initialized:
             return
         try:
@@ -248,12 +239,12 @@ class CloudSync:
                 .stream()
             )
             if not parents:
-                print(f"  [FCM] ⚠ Không tìm thấy phụ huynh của {student_id}")
+                print(f"  [FCM] ⚠ No parent found for student {student_id}")
                 return
             for parent_doc in parents:
                 token = parent_doc.to_dict().get("fcmToken", "")
                 if not token:
-                    print(f"  [FCM] ⚠ Phụ huynh {parent_doc.id} chưa có fcmToken")
+                    print(f"  [FCM] ⚠ Parent {parent_doc.id} has no fcmToken")
                     continue
                 msg = messaging.Message(
                     notification=messaging.Notification(title=title, body=body),
@@ -262,11 +253,9 @@ class CloudSync:
                 messaging.send(msg)
                 print(f"  [FCM] ✓ {title} → {parent_doc.id}")
         except Exception as e:
-            print(f"  [FCM] Lỗi gửi thông báo: {e}")
+            print(f"  [FCM] Error sending notification: {e}")
 
-    # ══════════════════════════════════════════════════════
-    # THAO TÁC TRÊN REALTIME DATABASE (GPS)
-    # ══════════════════════════════════════════════════════
+    # ── Realtime Database ──────────────────────────────────
 
     def push_gps(self, lat: float, lon: float, speed: float):
         if not self.initialized: return
@@ -280,4 +269,4 @@ class CloudSync:
                 "updatedAt": int(time.time() * 1000),
             })
         except Exception as e:
-            print(f"  [CLOUD] Lỗi Push GPS: {e}")
+            print(f"  [CLOUD] Error pushing GPS: {e}")

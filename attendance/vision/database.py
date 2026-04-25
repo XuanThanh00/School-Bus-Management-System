@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════
 # attendance/vision/database.py
-# FaceDatabase: lưu embedding + tìm kiếm cosine similarity.
-# Helpers: parse tên file ảnh, load/save .npz, đăng ký ảnh thẻ.
+# FaceDatabase: stores embeddings and searches by cosine similarity.
+# Helpers: parse image filenames, load/save .npz, register ID photos.
 # ══════════════════════════════════════════════════════════
 
 import os
@@ -13,7 +13,7 @@ from ..config import STUDENTS_DIR, DB_FILE
 
 
 # ──────────────────────────────────────────────────────────
-# Helpers: parse tên file & load thông tin ảnh thẻ
+# Helpers: parse filename & load ID photo info
 # ──────────────────────────────────────────────────────────
 
 def parse_student_filename(filename: str) -> dict:
@@ -22,7 +22,7 @@ def parse_student_filename(filename: str) -> dict:
       full_key   = "Nguyen_Van_Xuan_Thanh_1A2"
       full_name  = "Nguyen Van Xuan Thanh"
       class_name = "1A2"
-      display    = "Thanh"   ← phần tử áp chót (tên gọi ngắn)
+      display    = "Thanh"   ← second-to-last part (short call name)
     """
     stem  = os.path.splitext(filename)[0]
     parts = stem.split("_")
@@ -38,7 +38,7 @@ def parse_student_filename(filename: str) -> dict:
 
 
 def load_key_info() -> dict:
-    """Quét STUDENTS_DIR → dict[full_key → info_dict]."""
+    """Scan STUDENTS_DIR → dict[full_key → info_dict]."""
     key_info = {}
     if not os.path.isdir(STUDENTS_DIR):
         return key_info
@@ -68,15 +68,15 @@ def _save_npz(database: dict):
 
 
 # ──────────────────────────────────────────────────────────
-# Helpers: đăng ký ảnh thẻ → embedding
+# Helpers: register ID photos → embeddings
 # ──────────────────────────────────────────────────────────
 
 def _register_students(detector, recognizer, preprocessor,
                        key_info: dict) -> dict:
     """
-    Đọc ảnh trong STUDENTS_DIR, detect + embed từng ảnh,
-    average embedding nếu một người có nhiều ảnh (_2.jpg, _3.jpg...).
-    Trả về dict[full_key → avg_embedding].
+    Read images in STUDENTS_DIR, detect + embed each one,
+    average embeddings when a student has multiple photos (_2.jpg, _3.jpg...).
+    Returns dict[full_key → avg_embedding].
     """
     if not key_info:
         print(f"  ⚠ Không có ảnh trong '{STUDENTS_DIR}/'")
@@ -91,7 +91,7 @@ def _register_students(detector, recognizer, preprocessor,
         stem  = os.path.splitext(photo_file)[0]
         parts = stem.split("_")
 
-        # Tìm full_key khớp (ảnh chính hoặc ảnh phụ _2, _3, ...)
+        # Find matching full_key (primary photo or extra _2, _3, ...)
         if stem in groups:
             matched_key = stem
         elif parts[-1].isdigit():
@@ -123,7 +123,7 @@ def _register_students(detector, recognizer, preprocessor,
         emb  = recognizer.get_embedding(crop)
         groups[matched_key].append((emb, best[4], photo_file))
 
-    # Tính average embedding
+    # Compute average embedding
     database   = {}
     n_students = sum(1 for g in groups.values() if g)
     print(f"  Đăng ký {n_students} học sinh...")
@@ -158,10 +158,10 @@ def _register_students(detector, recognizer, preprocessor,
 
 class FaceDatabase:
     """
-    Lưu trữ embedding 512-d và tìm kiếm bằng dot product
-    (tương đương cosine vì embedding đã L2-normalized).
+    Stores 512-d embeddings and searches by dot product
+    (equivalent to cosine since embeddings are L2-normalised).
 
-    identify(emb)       → (full_key, score)
+    identify(emb)        → (full_key, score)
     identify_batch(embs) → list of (full_key, score)
     """
 
@@ -179,7 +179,7 @@ class FaceDatabase:
         return len(self.keys)
 
     def identify(self, emb: np.ndarray) -> tuple:
-        """Trả về (full_key, score) của embedding gần nhất."""
+        """Return (full_key, score) of the nearest embedding."""
         if not self.keys:
             return (None, 0.0)
         scores   = self.embeddings @ emb
@@ -187,7 +187,7 @@ class FaceDatabase:
         return (self.keys[best_idx], float(scores[best_idx]))
 
     def identify_batch(self, embeddings_list: list) -> list:
-        """Batch identify — trả về list of (full_key, score)."""
+        """Batch identify — return list of (full_key, score)."""
         if not self.keys or not embeddings_list:
             return [(None, 0.0)] * len(embeddings_list)
         embs     = np.array(embeddings_list, dtype=np.float32)   # (M, 512)
@@ -199,8 +199,8 @@ class FaceDatabase:
     @staticmethod
     def load(detector, recognizer, preprocessor) -> "FaceDatabase":
         """
-        Load từ cache .npz nếu có và còn đồng bộ với ảnh thẻ hiện tại.
-        Nếu không, đăng ký lại từ ảnh và lưu cache mới.
+        Load from .npz cache if present and still in sync with current ID photos.
+        Otherwise re-register from images and save a fresh cache.
         """
         key_info     = load_key_info()
         current_keys = set(key_info.keys())
