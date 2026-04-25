@@ -56,12 +56,12 @@ class STM32Protocol:
     Quản lý toàn bộ giao tiếp UART với STM32.
 
     Callbacks (set sau khi khởi tạo hoặc truyền vào constructor):
-        on_rfid(uid_hex: str)               — nhận UID thẻ, vd "FF8E4C1E"
-        on_gps(lat: float, lon: float)      — nhận tọa độ GPS
-        on_gps_no_fix(sat_count: int)       — GPS chưa có fix
-        on_hb_stm32(flags: int)             — heartbeat STM32
-        on_ready()                          — STM32 init xong, gửi ACK
-        on_ack(cmd_acked: int)              — STM32 ACK lệnh của Pi
+        on_rfid(uid_hex: str)                        — nhận UID thẻ, vd "FF8E4C1E"
+        on_gps(lat: float, lon: float, speed: float)  — nhận tọa độ + tốc độ GPS
+        on_gps_no_fix(sat_count: int)                 — GPS chưa có fix
+        on_hb_stm32(flags: int)                       — heartbeat STM32
+        on_ready()                                    — STM32 init xong, gửi ACK
+        on_ack(cmd_acked: int)                        — STM32 ACK lệnh của Pi
 
     Thread: RX chạy trong daemon thread riêng, TX dùng lock.
     """
@@ -289,11 +289,19 @@ class STM32Protocol:
                     self.send_ack(CMD_RFID_UID)
 
             elif cmd == CMD_GPS_DATA:
-                if len(payload) >= 8 and self.on_gps:
+                if len(payload) >= 12:
+                    # Format mới: lat + lon + speed_kmh (3 floats LE)
+                    lat, lon, speed = struct.unpack_from('<fff', payload, 0)
+                    logger.info(f"← GPS_DATA: {lat:.6f}, {lon:.6f}, {speed:.1f} km/h")
+                    if self.on_gps:
+                        self.on_gps(lat, lon, speed)
+                elif len(payload) >= 8:
+                    # Legacy 8B (firmware cũ, backward compat)
                     lat, lon = struct.unpack_from('<ff', payload, 0)
-                    logger.info(f"← GPS_DATA: {lat:.6f}, {lon:.6f}")
-                    self.on_gps(lat, lon)
-                    self.send_ack(CMD_GPS_DATA)
+                    logger.info(f"← GPS_DATA (legacy): {lat:.6f}, {lon:.6f}")
+                    if self.on_gps:
+                        self.on_gps(lat, lon, 0.0)
+                self.send_ack(CMD_GPS_DATA)
 
             elif cmd == CMD_GPS_NO_FIX:
                 sat = payload[0] if payload else 0

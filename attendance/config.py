@@ -66,3 +66,16 @@ HB_PI_INTERVAL       = 5.0    # giây giữa 2 lần gửi HB_PI lên STM32
 STM32_HB_TIMEOUT     = 30.0   # giây im lặng → cảnh báo + reset STM32
 FACE_PROMPT_COOLDOWN = 30.0  # giây giữa 2 lần phát "mời quét thẻ"
 RFID_WAIT_TIMEOUT    = 30.0   # giây chờ RFID sau khi face confirmed
+MIN_BOARD_SECONDS    = 300    # giây tối thiểu giữa lên xe và xuống xe (5 phút)
+
+# ── Chuyến sáng / chiều ────────────────────────────────
+# Giờ < MORNING_END_HOUR → session "morning"; >= → "afternoon"
+MORNING_END_HOUR     = 12
+
+# ══════════════════════════════════════════════════════════
+# FIREBASE  (Admin SDK — Firestore + Realtime Database)
+# ══════════════════════════════════════════════════════════
+FIREBASE_URL      = "https://student-management-1d269-default-rtdb.asia-southeast1.firebasedatabase.app"
+
+# Khoảng thời gian push GPS lên Firebase (giây)
+GPS_PUSH_INTERVAL = 10.0

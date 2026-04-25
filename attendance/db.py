@@ -94,7 +94,17 @@ class AttendanceDB:
 
             COMMIT;
         """)
-        # Migrate: thêm cột GPS nếu chưa có (idempotent — chạy lại không lỗi)
+        # ── Migrate students: student_id (Firebase key) ─────────
+        s_cols = {row[1] for row in self._conn.execute(
+            "PRAGMA table_info(students)"
+        ).fetchall()}
+        if "student_id" not in s_cols:
+            self._conn.execute(
+                "ALTER TABLE students ADD COLUMN student_id TEXT"
+            )
+            print("  ✓ Migrate: student_id column added (sẽ được sync từ Firebase)")
+
+        # ── Migrate attendance_records: GPS boarded + alighted ───
         existing = {row[1] for row in self._conn.execute(
             "PRAGMA table_info(attendance_records)"
         ).fetchall()}
@@ -106,6 +116,18 @@ class AttendanceDB:
             self._conn.execute(
                 "ALTER TABLE attendance_records ADD COLUMN gps_lon REAL"
             )
+        if "alighted_at" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN alighted_at TEXT"
+            )
+        if "alighted_lat" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN alighted_lat REAL"
+            )
+        if "alighted_lon" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN alighted_lon REAL"
+            )
 
     # ══════════════════════════════════════════════════════
     # SESSION
@@ -116,7 +138,7 @@ class AttendanceDB:
         if self._session_id is not None:
             return self._session_id
 
-        today = time.strftime("%Y-%m-%d")
+        today = self.get_today_date_str()
         row   = self._conn.execute(
             "SELECT id FROM attendance_sessions WHERE date = ?", (today,)
         ).fetchone()
@@ -132,6 +154,15 @@ class AttendanceDB:
             print(f"  ✓ Tạo session mới: {today} | {self.route}")
 
         return self._session_id
+
+    def get_today_date_str(self) -> str:
+        """Trả về chuỗi format YYYY-MM-DD_AM hoặc YYYY-MM-DD_PM (dùng cho SQLite session)."""
+        suffix = "AM" if time.localtime().tm_hour < 12 else "PM"
+        return f"{time.strftime('%Y-%m-%d')}_{suffix}"
+
+    def get_today_date_only(self) -> str:
+        """Trả về chuỗi format YYYY-MM-DD (dùng làm doc_id prefix trong Firestore)."""
+        return time.strftime('%Y-%m-%d')
 
     # ══════════════════════════════════════════════════════
     # STUDENTS
@@ -150,17 +181,19 @@ class AttendanceDB:
             full_name  = rec["full_name"]
             class_name = rec["class_name"]
             uid        = rec["uid"].upper()
+            student_id = rec.get("student_id")
 
-            # Upsert student
+            # Upsert student — COALESCE giữ student_id cũ nếu giá trị mới là NULL
             self._conn.execute("""
-                INSERT INTO students (full_name, class_name, uid)
-                VALUES (?, ?, ?)
+                INSERT INTO students (full_name, class_name, uid, student_id)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(uid) DO UPDATE SET
                     full_name  = excluded.full_name,
-                    class_name = excluded.class_name
-            """, (full_name, class_name, uid))
+                    class_name = excluded.class_name,
+                    student_id = COALESCE(excluded.student_id, student_id)
+            """, (full_name, class_name, uid, student_id))
 
-            # Lấy student_id
+            # Lấy internal sid của SQLite
             sid = self._conn.execute(
                 "SELECT id FROM students WHERE uid = ?", (uid,)
             ).fetchone()["id"]
@@ -176,7 +209,7 @@ class AttendanceDB:
     def get_all_students(self) -> list[dict]:
         """Trả về tất cả học sinh."""
         rows = self._conn.execute(
-            "SELECT id, full_name, class_name, uid FROM students ORDER BY full_name"
+            "SELECT id, full_name, class_name, uid, student_id FROM students ORDER BY full_name"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -286,10 +319,128 @@ class AttendanceDB:
                 checked_at    = excluded.checked_at,
                 evidence_path = excluded.evidence_path,
                 gps_lat       = excluded.gps_lat,
-                gps_lon       = excluded.gps_lon
+                gps_lon       = excluded.gps_lon,
+                alighted_at   = NULL,
+                alighted_lat  = NULL,
+                alighted_lon  = NULL
         """, (session_id, student_id, ts, img_path, gps_lat, gps_lon))
 
         return img_path
+
+    def mark_alighted(self, uid: str,
+                      min_board_seconds: int = 0,
+                      gps_lat: float = None,
+                      gps_lon: float = None) -> int:
+        """
+        Ghi giờ xuống xe vào attendance_record đã boarded hôm nay.
+        Trả về:
+           1  → xuống xe thành công
+           0  → chưa lên xe (hoặc đã xuống rồi)
+          -1  → vừa lên xe, chưa đủ min_board_seconds
+        """
+        uid = uid.upper() if uid else ""
+        if not uid:
+            return 0
+
+        session_id = self.get_today_session_id()
+        ts = time.strftime("%H:%M:%S")
+
+        row = self._conn.execute("""
+            SELECT ar.id, ar.checked_at
+            FROM attendance_records ar
+            JOIN students s ON s.id = ar.student_id
+            WHERE s.uid = ?
+              AND ar.session_id = ?
+              AND ar.status = 1
+              AND ar.alighted_at IS NULL
+        """, (uid, session_id)).fetchone()
+
+        if row is None:
+            return 0   # chưa boarded hoặc đã alighted rồi
+
+        # Kiểm tra thời gian tối thiểu kể từ lúc lên xe
+        if min_board_seconds > 0 and row["checked_at"]:
+            def _to_sec(t: str) -> int:
+                h, m, s = t.split(":")
+                return int(h) * 3600 + int(m) * 60 + int(s)
+            elapsed = _to_sec(ts) - _to_sec(row["checked_at"])
+            if elapsed < min_board_seconds:
+                remaining = min_board_seconds - elapsed
+                print(f"    [DB] Vừa lên xe {elapsed//60:.0f}p{elapsed%60:.0f}s trước "
+                      f"— còn {remaining//60:.0f}p{remaining%60:.0f}s nữa mới được xuống")
+                return -1
+
+        self._conn.execute("""
+            UPDATE attendance_records
+            SET alighted_at  = ?,
+                alighted_lat = ?,
+                alighted_lon = ?
+            WHERE id = ?
+        """, (ts, gps_lat, gps_lon, row[0]))
+
+        return 1
+
+    def get_student_firebase_id(self, uid: str) -> str | None:
+        """
+        Trả về student_id Firebase (vd 'hs001') theo uid thẻ.
+        Trả về None nếu không tìm thấy hoặc chưa sync.
+        """
+        uid = uid.upper() if uid else ""
+        row = self._conn.execute(
+            "SELECT student_id FROM students WHERE uid = ?", (uid,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def update_student_id(self, uid: str, student_id: str) -> bool:
+        """
+        Cập nhật student_id Firebase cho học sinh theo uid thẻ.
+        Gọi sau khi fetch danh sách users từ Firebase.
+        Trả về True nếu cập nhật thành công.
+        """
+        uid = uid.upper() if uid else ""
+        cur = self._conn.execute(
+            "UPDATE students SET student_id=? WHERE uid=?",
+            (student_id, uid)
+        )
+        return cur.rowcount > 0
+
+    def update_student_id_by_name(self, full_name: str, student_id: str) -> bool:
+        """
+        Cập nhật student_id Firebase theo tên học sinh.
+        Dùng khi Firebase users dùng studentName để match.
+        """
+        cur = self._conn.execute(
+            "UPDATE students SET student_id=? WHERE full_name=?",
+            (student_id, full_name)
+        )
+        return cur.rowcount > 0
+
+    def get_students_missing_firebase_id(self) -> list[dict]:
+        """Trả về học sinh chưa có student_id (chưa sync từ Firebase)."""
+        rows = self._conn.execute(
+            "SELECT uid, full_name, class_name FROM students "
+            "WHERE student_id IS NULL OR student_id = '' "
+            "ORDER BY full_name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_boarded_students_today(self) -> list[dict]:
+        """
+        Trả về list học sinh đã lên xe hôm nay (status=1).
+        Keys: uid, student_id, full_name, class_name,
+              checked_at, gps_lat, gps_lon,
+              alighted_at, alighted_lat, alighted_lon
+        """
+        session_id = self.get_today_session_id()
+        rows = self._conn.execute("""
+            SELECT s.uid, s.student_id, s.full_name, s.class_name,
+                   ar.checked_at, ar.gps_lat, ar.gps_lon,
+                   ar.alighted_at, ar.alighted_lat, ar.alighted_lon
+            FROM attendance_records ar
+            JOIN students s ON s.id = ar.student_id
+            WHERE ar.session_id = ? AND ar.status = 1
+        """, (session_id,)).fetchall()
+        return [dict(r) for r in rows]
 
     # ══════════════════════════════════════════════════════
     # QUERY

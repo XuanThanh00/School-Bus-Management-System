@@ -22,6 +22,8 @@ from .config import (
     TRACK_FACE_START, TRACK_AUTH_OK, TRACK_FACE_MISMATCH,
     HB_PI_INTERVAL, STM32_HB_TIMEOUT,
     FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
+    FIREBASE_URL, GPS_PUSH_INTERVAL, STUDENT_IMG_DIR,
+    STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR
 )
 from .vision          import (ImagePreprocessor, YuNetDetector,
                                BuffaloRecognizer, FaceDatabase, load_key_info)
@@ -58,12 +60,17 @@ class AttendanceSystem:
         self.att_db = AttendanceDB()
         self.uid_map: dict = {}
 
+        # Cloud Sync
+        self._cloud = None
+        self._last_gps_push = 0.0   # throttle GPS push
+
         # ── STM32 / system state ────────────────────────────
         self._handshake_done    = False
         self._last_stm32_hb     = time.time()
         self._last_hb_pi_sent   = 0.0
         self._gps_lat:  float | None = None
         self._gps_lon:  float | None = None
+        self._gps_speed: float       = 0.0
         self._gps_str           = "GPS: --"
         self._running           = False
 
@@ -104,6 +111,7 @@ class AttendanceSystem:
     # ══════════════════════════════════════════════════════
 
     def setup(self):
+        self._init_cloud()
         self._load_models()
         self._load_database()
         self._init_stm32()
@@ -201,6 +209,32 @@ class AttendanceSystem:
         self._display = BusDisplay(route="TUYEN 01", fullscreen=False)
         print("  ✓ Pygame display sẵn sàng")
 
+    def _init_cloud(self):
+        from .cloud_sync import CloudSync
+        print("Đang kết nối hệ sinh thái Cloud Firebase (Realtime + Firestore)...")
+        self._cloud = CloudSync(
+            service_account_path="credentials.json",
+            database_url=FIREBASE_URL
+        )
+
+        if self._cloud.initialized:
+            print("  ✓ Đang kiểm tra cấu hình Học sinh từ Server...")
+            existing = self.att_db.get_all_students()
+            synced_records, images_changed = self._cloud.sync_students_to_pi(
+                STUDENTS_DIR, existing
+            )
+            if synced_records:
+                self.att_db.ensure_students(synced_records)
+                if images_changed:
+                    if os.path.exists(DB_FILE):
+                        os.remove(DB_FILE)
+                    print("  ✓ Cache embedding cũ đã xóa → sẽ rebuild từ ảnh Firebase")
+                else:
+                    print("  ✓ Embedding giữ nguyên (không cần rebuild)")
+
+            # Reset attendanceStatus cho web admin
+            self._cloud.reset_all_attendance_status()
+
     # ══════════════════════════════════════════════════════
     # STM32 CALLBACKS  (chạy trong RX thread của STM32Protocol)
     # ══════════════════════════════════════════════════════
@@ -215,9 +249,6 @@ class AttendanceSystem:
         self._last_stm32_hb = time.time()
         if not self._handshake_done:
             self._handshake_done = True
-        if not (flags & FLAG_GPS_FIX):
-            # GPS chưa fix: giữ nguyên GPS string nếu đã có
-            pass
 
     def _on_rfid(self, uid_hex: str):
         """Callback khi STM32 gửi RFID_UID — chạy trong RX thread."""
@@ -228,10 +259,11 @@ class AttendanceSystem:
             daemon=True
         ).start()
 
-    def _on_gps(self, lat: float, lon: float):
-        self._gps_lat = lat
-        self._gps_lon = lon
-        self._gps_str = f"GPS: {lat:.5f}, {lon:.5f}"
+    def _on_gps(self, lat: float, lon: float, speed: float = 0.0):
+        self._gps_lat   = lat
+        self._gps_lon   = lon
+        self._gps_speed = speed
+        self._gps_str   = f"GPS: {lat:.5f}, {lon:.5f} | {speed:.0f} km/h"
 
     def _on_gps_no_fix(self, sat_count: int):
         self._gps_str = f"GPS: no fix (sat={sat_count})"
@@ -268,6 +300,18 @@ class AttendanceSystem:
                     print(f"  ⚠ STM32 im lặng {stm32_silent:.0f}s → hard reset")
                     self.stm32.reset_stm32()
                     self._last_stm32_hb = now   # reset timer tránh loop
+
+                # ── Push GPS lên Firebase định kỳ ───────────
+                if (self._cloud
+                        and self._gps_lat is not None
+                        and now - self._last_gps_push >= GPS_PUSH_INTERVAL):
+                    lat, lon, spd = self._gps_lat, self._gps_lon, self._gps_speed
+                    threading.Thread(
+                        target=self._cloud.push_gps,
+                        args=(lat, lon, spd),
+                        daemon=True,
+                    ).start()
+                    self._last_gps_push = now
 
                 # ── Face inference ──────────────────────────
                 self._frame_counter += 1
@@ -355,18 +399,6 @@ class AttendanceSystem:
         self._last_results = results
         self._inference_times.append(time.time() - t0)
 
-        # ── Phát "mời quét thẻ" khi detect được mặt ────────
-        if has_face:
-            if now >= self._face_prompt_cooldown:
-                waiting_rfid = any(
-                    (now - ts) <= RFID_WAIT_TIMEOUT
-                    for ts in self._face_pending.values()
-                )
-                if not waiting_rfid:
-                    self.stm32.send_play_audio(TRACK_INVITE_SCAN)
-                    self._face_prompt_cooldown = now + FACE_PROMPT_COOLDOWN
-        else:
-            self._face_prompt_cooldown = 0.0
 
     # ══════════════════════════════════════════════════════
     # RFID HANDLER
@@ -405,7 +437,26 @@ class AttendanceSystem:
 
         self.stm32.send_play_audio(TRACK_SCAN_OK)
 
-        # ── Đưa vào rfid_pending để 2-factor ghép với face ──
+        # ── Phân biệt LÊN xe vs XUỐNG xe ───────────────────
+        # Nếu học sinh đã boarded hôm nay và chưa alighted
+        # → đây là lượt xuống xe (chỉ cần RFID, không cần face)
+        # Nếu chưa boarded → flow lên xe (face pending)
+        alight_result = self.att_db.mark_alighted(
+            uid_hex,
+            min_board_seconds=MIN_BOARD_SECONDS,
+            gps_lat=self._gps_lat,
+            gps_lon=self._gps_lon,
+        )
+
+        if alight_result == 1:
+            self._record_alighted(uid_hex, full_name, class_name)
+            return
+        elif alight_result == -1:
+            # Vừa lên xe, quẹt thẻ xuống quá sớm → bỏ qua
+            print(f"  [RFID] {full_name} — quẹt thẻ xuống xe quá sớm, bỏ qua")
+            return
+
+        # alight_result == 0 → chưa boarded → flow lên xe: đưa vào rfid_pending chờ face
         self._rfid_pending[(full_name, class_name)] = now
         print(f"  [RFID] {full_name} ({class_name}) — chờ xác thực mặt")
 
@@ -454,18 +505,41 @@ class AttendanceSystem:
                 continue
 
             face_key = (info["full_name"], info["class_name"])
-            if face_key in self._confirmed_set:
-                continue
 
             self._confirm_tracker[full_key] = (
                 self._confirm_tracker.get(full_key, 0) + 1)
             if self._confirm_tracker[full_key] < CONFIRM_FRAMES:
                 continue
 
+            # Kiểm tra học sinh đã lên xe chưa để quyết định boarding hay alighting
+            uid = self._get_uid_by_name(info["full_name"], info["class_name"])
+            alight_result = self.att_db.mark_alighted(
+                uid,
+                min_board_seconds=MIN_BOARD_SECONDS,
+                gps_lat=self._gps_lat,
+                gps_lon=self._gps_lon,
+            )
+
             self._confirmed_set.add(face_key)
             self._master_mode = False
-            self._record_attendance(face_key, frame_bgr, is_master=True)
+
+            if alight_result == 1:
+                # Đã lên xe đủ lâu → ghi xuống xe
+                self._record_alighted(uid, info["full_name"], info["class_name"])
+            elif alight_result == -1:
+                # Vừa lên xe, chưa đủ thời gian
+                print(f"  [MASTER] {info['full_name']} — vừa lên xe, chưa đủ thời gian xuống")
+                self.stm32.send_play_audio(TRACK_FACE_MISMATCH)
+            else:
+                # Chưa lên xe → ghi lên xe
+                self._record_attendance(face_key, frame_bgr, is_master=True)
             break
+
+    @staticmethod
+    def _current_session() -> str:
+        """Trả về 'morning' hoặc 'afternoon' dựa theo giờ hiện tại."""
+        import datetime
+        return "morning" if datetime.datetime.now().hour < MORNING_END_HOUR else "afternoon"
 
     def _record_attendance(self, face_key: tuple,
                            frame_bgr: np.ndarray, is_master: bool):
@@ -481,10 +555,65 @@ class AttendanceSystem:
         tag = " [MASTER KEY]" if is_master else ""
         self._attendance_log.append((f"{full_name}{tag}", ts))
         self._last_log.append((full_name, ts, is_master))
-        print(f"  ✓ ĐIỂM DANH{tag}: {full_name} | lớp {class_name} | {ts}")
+        session = self._current_session()
+        print(f"  ✓ ĐIỂM DANH{tag} [{session}]: {full_name} | lớp {class_name} | {ts}")
         print(f"    → {img_path}")
 
         self.stm32.send_play_audio(TRACK_AUTH_OK)
+
+        # Cloud Sync push boarded (chạy trong thread riêng)
+        if self._cloud:
+            student_id = self.att_db.get_student_firebase_id(uid)
+            date_str   = self.att_db.get_today_date_only()
+            id_key = student_id or full_name.replace(" ", "_")
+            doc_id = f"{date_str}_{session}_{id_key}"
+
+            threading.Thread(
+                target=self._cloud.push_attendance,
+                args=(doc_id, student_id or id_key, full_name, date_str, ts,
+                      True, self._gps_lat, self._gps_lon, img_path),
+                daemon=True,
+            ).start()
+
+            session_vn = "sáng" if session == "morning" else "chiều"
+            threading.Thread(
+                target=self._cloud.send_fcm,
+                args=(student_id or id_key,
+                      f"Con đã lên xe chuyến {session_vn}",
+                      f"{full_name} lên xe lúc {ts}"),
+                daemon=True,
+            ).start()
+
+    def _record_alighted(self, uid_hex: str, full_name: str, class_name: str):
+        """Ghi log xuống xe + push Cloud (gọi từ _handle_rfid thread)."""
+        ts = time.strftime("%H:%M:%S")
+        session = self._current_session()
+        print(f"  ✓ XUỐNG XE [{session}]: {full_name} | lớp {class_name} | {ts}")
+        self.stm32.send_play_audio(TRACK_AUTH_OK)
+
+        # Cloud Sync push alighted (chạy trong thread riêng)
+        if self._cloud:
+            student_id = self.att_db.get_student_firebase_id(uid_hex)
+            date_str   = self.att_db.get_today_date_only()
+            id_key = student_id or full_name.replace(" ", "_")
+            doc_id = f"{date_str}_{session}_{id_key}"
+
+            threading.Thread(
+                target=self._cloud.push_attendance,
+                args=(doc_id, student_id or id_key, full_name, date_str, ts,
+                      False, self._gps_lat, self._gps_lon, None),
+                daemon=True,
+            ).start()
+
+            session_vn  = "sáng" if session == "morning" else "chiều"
+            alight_msg  = "đã đến trường" if session == "morning" else "đã về đến nơi"
+            threading.Thread(
+                target=self._cloud.send_fcm,
+                args=(student_id or id_key,
+                      f"Con {alight_msg} ({session_vn})",
+                      f"{full_name} xuống xe lúc {ts}"),
+                daemon=True,
+            ).start()
 
     # ══════════════════════════════════════════════════════
     # DISPLAY STATE
