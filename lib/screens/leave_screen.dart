@@ -64,6 +64,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
   // Parent/student data for submitting the request
   String? _parentDocId;
+  String? _parentName;
   String? _studentId;
   String? _studentName;
   String? _studentClass;
@@ -100,7 +101,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
 
       if (parentSnap.docs.isEmpty) return;
 
-      final parentDoc = parentSnap.docs.first;
+      final parentDoc  = parentSnap.docs.first;
+      final parentName = parentDoc.data()['displayName']?.toString() ?? '';
       final studentIds = List<String>.from(parentDoc.data()['studentIds'] ?? []);
 
       String studentName = '';
@@ -122,6 +124,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
       if (mounted) {
         setState(() {
           _parentDocId  = parentDoc.id;
+          _parentName   = parentName;
           _studentId    = studentId;
           _studentName  = studentName;
         });
@@ -206,7 +209,8 @@ class _LeaveScreenState extends State<LeaveScreen> {
         'studentId':    _studentId ?? '',
         'studentName':  _studentName ?? '',
         'studentClass': _studentClass ?? '',
-        'parentId':    _parentDocId ?? '',
+        'parentId':     _parentDocId ?? '',
+        'parentName':   _parentName ?? '',
         'startDate':   dateStr,
         'endDate':     dateStr,
         'reason':      _reasonCtrl.text.trim(),

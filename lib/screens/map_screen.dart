@@ -15,27 +15,44 @@ class _GpsData {
   final double lat;
   final double lng;
   final double speed; // km/h
+  final bool   reachedDestination;
+  final String routeFromId;
+  final String routeFromName;
+  final String routeToId;
+  final String routeToName;
 
   const _GpsData({
     required this.lat,
     required this.lng,
     required this.speed,
+    this.reachedDestination = false,
+    this.routeFromId   = '',
+    this.routeFromName = '',
+    this.routeToId     = '',
+    this.routeToName   = '',
   });
 
   factory _GpsData.fromMap(Map map) => _GpsData(
-    lat: (map['lat'] as num).toDouble(),
-    lng: (map['lng'] as num).toDouble(),
+    lat:   (map['lat'] as num).toDouble(),
+    lng:   (map['lng'] as num).toDouble(),
     speed: (map['speed'] as num?)?.toDouble() ?? 0.0,
+    reachedDestination: map['reachedDestination'] as bool?   ?? false,
+    routeFromId:        map['routeFromId']        as String? ?? '',
+    routeFromName:      map['routeFromName']      as String? ?? '',
+    routeToId:          map['routeToId']          as String? ?? '',
+    routeToName:        map['routeToName']        as String? ?? '',
   );
 }
 
 class _StopData {
+  final String id;
   final String name;
   final double lat;
   final double lng;
   final int order;
 
   const _StopData({
+    required this.id,
     required this.name,
     required this.lat,
     required this.lng,
@@ -191,6 +208,7 @@ class _MapScreenState extends State<MapScreen> {
         final d   = doc.data();
         final loc = d['location'] as Map<String, dynamic>? ?? {};
         return _StopData(
+          id:    doc.id,
           name:  d['name']?.toString() ?? '',
           lat:   (loc['lat'] as num?)?.toDouble() ?? 0.0,
           lng:   (loc['lng'] as num?)?.toDouble() ?? 0.0,
@@ -256,12 +274,22 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   bool _isDone(_StopData stop) {
+    final gps = _gps;
+    if (gps != null && gps.routeFromId.isNotEmpty) {
+      final fromIdx = _stops.indexWhere((s) => s.id == gps.routeFromId);
+      if (fromIdx >= 0) return stop.order <= _stops[fromIdx].order;
+    }
+    // fallback: haversine-based
     final ref = _arrivedStop ?? _nearestStop;
     if (ref == null) return false;
     return stop.order < ref.order;
   }
 
   bool _isCurrent(_StopData stop) {
+    final gps = _gps;
+    if (gps != null && gps.reachedDestination && gps.routeToId.isNotEmpty) {
+      return stop.id == gps.routeToId;
+    }
     return stop == _arrivedStop;
   }
 
@@ -486,6 +514,44 @@ class _MapScreenState extends State<MapScreen> {
                 : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // Route banner — shown when Pi sends route info
+                if (_gps != null && _gps!.routeToName.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: AppCard(
+                      child: Row(
+                        children: [
+                          Icon(
+                            _gps!.reachedDestination
+                                ? Icons.where_to_vote_rounded
+                                : Icons.navigation_rounded,
+                            size: 18,
+                            color: _gps!.reachedDestination
+                                ? AppColors.present
+                                : AppColors.primary,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _gps!.reachedDestination
+                                  ? 'Xe đã đến ${_gps!.routeToName}'
+                                  : (_gps!.routeFromName.isNotEmpty
+                                      ? '${_gps!.routeFromName} → ${_gps!.routeToName}'
+                                      : 'Đang đến ${_gps!.routeToName}'),
+                              style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _gps!.reachedDestination
+                                    ? AppColors.present
+                                    : AppColors.textMain,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                 // ETA + speed + distance
                 AppCard(
                   child: Row(
