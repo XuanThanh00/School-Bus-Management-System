@@ -7,6 +7,7 @@ import './App.css';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Dashboard from './pages/Dashboard';
+import GpsDemoPage from './pages/GpsDemoPage';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -31,6 +32,14 @@ function AppContent() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/gps-demo"
+        element={
+          <ProtectedRoute>
+            <GpsDemoPage />
           </ProtectedRoute>
         }
       />

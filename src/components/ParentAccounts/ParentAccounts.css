@@ -1,0 +1,90 @@
+/* ParentAccounts.css */
+
+/* Account card list item */
+.parent-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  background: white;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin-bottom: 12px;
+  transition: box-shadow .2s, border-color .2s;
+}
+.parent-card:hover {
+  border-color: var(--primary-light);
+  box-shadow: 0 2px 10px rgba(0,82,204,.08);
+}
+
+/* Auth status indicator */
+.auth-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.auth-status.active {
+  background: #DCFCE7;
+  color: #166534;
+}
+.auth-status.pending {
+  background: #FEF3C7;
+  color: #92400E;
+}
+.auth-status svg { font-size: 16px; }
+
+/* Parent avatar */
+.parent-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.parent-info { flex: 1; min-width: 0; }
+.parent-name { font-weight: 600; font-size: 18px; }
+.parent-phone { font-size: 15px; color: var(--text-light); font-family: monospace; }
+
+/* Student link chips */
+.student-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.student-chip {
+  background: var(--primary-pale);
+  color: var(--primary);
+  border-radius: 12px;
+  padding: 3px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Register form card */
+.register-form-card {
+  background: white;
+  border-radius: var(--radius);
+  padding: 24px 28px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 24px;
+  border: 2px solid var(--primary-pale);
+}
+
+/* Empty state */
+.parents-empty svg {
+  font-size: 56px;
+  color: #CBD5E1;
+  margin-bottom: 12px;
+}

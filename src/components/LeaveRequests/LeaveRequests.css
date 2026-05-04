@@ -1,0 +1,105 @@
+/* LeaveRequests.css */
+
+/* Auto-approve stats row */
+.leave-stats-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.leave-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.leave-stat.approved {
+  background: #D1FAE5;
+  color: #047857;
+  border: 1px solid #6EE7B7;
+}
+.leave-stat.rejected {
+  background: #FEE2E2;
+  color: #B91C1C;
+  border: 1px solid #FCA5A5;
+}
+
+
+/* Status-colored row left border */
+.leave-row-pending  { border-left: 3px solid var(--warning); }
+.leave-row-approved { border-left: 3px solid var(--success); }
+.leave-row-rejected { border-left: 3px solid var(--danger); }
+.leave-row-pending:hover  { background: #FFFBEB; }
+.leave-row-approved:hover { background: #F0FDF4; }
+.leave-row-rejected:hover { background: #FEF2F2; }
+
+/* Pill-style tab bar */
+.tab-bar {
+  background: white;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.tab-btn {
+  border-radius: 8px;
+  border-bottom: none;
+  margin-bottom: 0;
+  padding: 11px 20px;
+  font-size: 16px;
+}
+.tab-btn:hover {
+  background: var(--bg);
+}
+.tab-btn.active {
+  background: var(--primary);
+  color: white;
+  border-bottom-color: transparent;
+  box-shadow: 0 2px 6px rgba(0,82,204,.25);
+}
+
+/* Action button icons */
+.btn-approve, .btn-reject {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+}
+.btn-approve svg, .btn-reject svg { font-size: 18px; }
+
+/* Process/view action button */
+.leave-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 17px;
+}
+.leave-action-btn svg { font-size: 18px; }
+
+/* Empty state */
+.leave-empty svg {
+  font-size: 56px;
+  color: #CBD5E1;
+  margin-bottom: 12px;
+}
+
+/* Pending count badge in header */
+.pending-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 16px;
+  font-weight: 700;
+  margin-left: 14px;
+  vertical-align: middle;
+}
+.pending-count-badge svg { font-size: 16px; }

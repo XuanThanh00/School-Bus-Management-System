@@ -1,0 +1,131 @@
+/* BusStops.css */
+.busstops-page {}
+
+/* School fixed location bar */
+.school-location-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
+  border: 1px solid #BFDBFE;
+  border-radius: var(--radius-sm);
+  margin-bottom: 24px;
+  font-size: 16px;
+  color: var(--text);
+  flex-wrap: wrap;
+}
+
+/* Geocoding status below address input */
+.geocode-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 500;
+}
+.geocode-status.geocoding {
+  background: #FFF7ED;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+}
+.geocode-status.geocoded {
+  background: #ECFDF5;
+  color: #166534;
+  border: 1px solid #86EFAC;
+}
+.geocode-status svg { font-size: 17px; }
+
+/* Pending geocode display in table */
+.geocode-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-light);
+  font-size: 15px;
+}
+
+/* Spinner small for inline use */
+.spinner-sm {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #FDE68A;
+  border-top-color: #92400E;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Order number badge */
+.stop-order-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: 0 2px 6px rgba(0,82,204,.3);
+}
+
+/* Coordinate display */
+.coord-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #F1F5F9;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-family: 'Consolas', monospace;
+  font-size: 16px;
+  color: var(--text);
+}
+.coord-display svg {
+  font-size: 14px;
+  color: var(--primary);
+}
+
+/* Stop name */
+.stop-name {
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text);
+}
+.stop-address {
+  font-size: 15px;
+  color: var(--text-light);
+  margin-top: 3px;
+}
+
+/* Edit/delete action group */
+.action-btns .btn-icon svg,
+.action-btns .btn-icon-danger svg {
+  font-size: 17px;
+}
+
+/* Empty state for bus stops */
+.busstops-empty svg {
+  font-size: 64px;
+  color: #CBD5E1;
+  margin-bottom: 12px;
+}
+
+/* Info box with bus icon */
+.busstops-info-box {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.busstops-info-box svg {
+  font-size: 20px;
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}

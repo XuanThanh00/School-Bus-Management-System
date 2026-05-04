@@ -1,46 +1,134 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { addStudent } from '../../services/studentService';
+import { registerParent } from '../../services/authService';
 import { useAuth } from '../../hooks/useAuth';
 import { addLog } from '../../services/logService';
-import { getCurrentLocation } from '../../services/geolocationService';
+import { listenToBusStops } from '../../services/busStopService';
+import {
+  listenToPendingRFID,
+  clearPendingRFID,
+  checkRfidRegistered,
+} from '../../services/rfidService';
+import ContactlessIcon from '@mui/icons-material/Contactless';
+import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
+import LocationOnIcon from '@mui/icons-material/LocationOn';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import BadgeIcon from '@mui/icons-material/Badge';
+import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
+import ImageIcon from '@mui/icons-material/Image';
+import CreditCardIcon from '@mui/icons-material/CreditCard';
+import LinkIcon from '@mui/icons-material/Link';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import './StudentForm.css';
+
+const CLASSES = [
+  '1A1','1A2','1A3','1B1','1B2',
+  '2A1','2A2','2A3','2B1','2B2',
+  '3A1','3A2','3A3','3B1','3B2',
+  '4A1','4A2','4A3','4B1','4B2',
+];
+
+const generateStudentId = () => `hs${Date.now().toString().slice(-5)}`;
+
+const toInputDate = (vn) => {
+  if (!vn) return '';
+  const [d, m, y] = vn.split('/');
+  return (d && m && y) ? `${y}-${m}-${d}` : '';
+};
+
+const toVNDate = (iso) => {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
 
 const StudentForm = () => {
-  const [name, setName] = useState('');
-  const [className, setClassName] = useState('');
-  const [imageFile, setImageFile] = useState(null);
-  const [imagePreview, setImagePreview] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [gettingLocation, setGettingLocation] = useState(false);
-  const [locationData, setLocationData] = useState(null);
   const { currentUser } = useAuth();
+
+  const [studentId, setStudentId]     = useState(generateStudentId());
+  const [name, setName]               = useState('');
+  const [className, setClassName]     = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [parentName, setParentName]   = useState('');
+  const [parentPhone, setParentPhone] = useState('');
+
+  const [imageFile, setImageFile]         = useState(null);
+  const [imagePreview, setImagePreview]   = useState(null);
+  const [busStops, setBusStops]           = useState([]);
+  const [selectedStop, setSelectedStop]   = useState(null);
+
+  // RFID
+  const [rfidUid, setRfidUid]             = useState(null);
+  const [rfidListening, setRfidListening] = useState(true);
+  const [rfidDuplicate, setRfidDuplicate] = useState(null);   // student that already owns this card
+  const [checkingRfid, setCheckingRfid]   = useState(false);
+
+  // Status
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [success, setSuccess] = useState('');
+
+  // Load active bus stops
+  useEffect(() => {
+    const unsub = listenToBusStops((data) => {
+      setBusStops(data.filter((s) => s.isActive !== false && s.location?.lat && s.location?.lng));
+    });
+    return unsub;
+  }, []);
+
+  // Listen real-time UID from ESP32 via RTDB
+  useEffect(() => {
+    const unsubscribe = listenToPendingRFID((data) => {
+      if (data?.uid) {
+        setRfidUid(data.uid);
+        setRfidListening(false);
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // When UID arrives, check if already registered to another student
+  useEffect(() => {
+    if (!rfidUid) {
+      setRfidDuplicate(null);
+      return;
+    }
+    setCheckingRfid(true);
+    checkRfidRegistered(rfidUid)
+      .then((student) => setRfidDuplicate(student))
+      .catch(() => setRfidDuplicate(null))
+      .finally(() => setCheckingRfid(false));
+  }, [rfidUid]);
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setImagePreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
-  const handleGetLocation = async () => {
-    setGettingLocation(true);
-    setError('');
-    try {
-      const location = await getCurrentLocation();
-      setLocationData(location);
-      setSuccess(`📍 Vị trí: ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)} (±${location.accuracy.toFixed(0)}m)`);
-    } catch (err) {
-      setError('Không thể lấy vị trí: ' + err.message);
-    } finally {
-      setGettingLocation(false);
-    }
+  const handleSelectStop = (stopId) => {
+    const stop = busStops.find((s) => s.id === stopId) || null;
+    setSelectedStop(stop);
+  };
+
+  const handleClearRFID = () => {
+    setRfidUid(null);
+    setRfidDuplicate(null);
+    setRfidListening(true);
+    clearPendingRFID();
+  };
+
+
+
+  const flashSuccess = (msg) => {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 3500);
   };
 
   const handleSubmit = async (e) => {
@@ -48,142 +136,299 @@ const StudentForm = () => {
     setError('');
     setSuccess('');
 
-    if (!name.trim() || !className.trim()) {
-      setError('Vui lòng điền đầy đủ thông tin');
+    if (!name.trim() || !className) {
+      setError('Vui lòng điền họ tên và chọn lớp');
       return;
     }
 
     setLoading(true);
-
     try {
       const studentData = {
+        studentId: studentId.trim(),
         name: name.trim(),
-        class: className.trim(),
+        class: className,
+        dateOfBirth: dateOfBirth || '',
+        parentName: parentName.trim(),
+        parentPhone: parentPhone.trim(),
+        attendanceStatus: 'not_boarded',
         status: false,
-        ...(locationData && {
+        ...(rfidUid && { rfidCardId: rfidUid }),
+        ...(selectedStop && {
+          busStopId:   selectedStop.id,
+          busStopName: selectedStop.name,
           location: {
-            lat: locationData.lat,
-            lng: locationData.lng,
-            accuracy: locationData.accuracy,
+            lat:       selectedStop.location.lat,
+            lng:       selectedStop.location.lng,
+            accuracy:  0,
             timestamp: new Date(),
           },
         }),
       };
 
       await addStudent(studentData, imageFile);
-
-      if (currentUser) {
-        await addLog(currentUser.uid, `Thêm học sinh: ${name}`);
+      if (parentPhone.trim()) {
+        await registerParent({
+          phone: parentPhone.trim(),
+          displayName: parentName.trim() || parentPhone.trim(),
+          password: '123456',
+          studentId: studentId.trim(),
+        });
       }
 
-      setSuccess('✅ Thêm học sinh thành công!');
+      if (rfidUid) await clearPendingRFID();
+      if (currentUser) await addLog(currentUser.uid, `Thêm học sinh: ${name}${rfidUid ? ` (RFID: ${rfidUid})` : ''}`);
 
-      setName('');
-      setClassName('');
-      setImageFile(null);
-      setImagePreview(null);
-      setLocationData(null);
-
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError(err.message || 'Thêm học sinh thất bại');
+      flashSuccess('Thêm học sinh thành công!');
+      resetForm();
+    } catch (e) {
+      setError(e.message || 'Thêm học sinh thất bại');
     } finally {
       setLoading(false);
     }
   };
 
-  const classes = ['12A1', '12A2', '12A3', '12B1', '12B2', '11A1', '11A2', '10A1'];
+  const resetForm = () => {
+    setStudentId(generateStudentId());
+    setName('');
+    setClassName('');
+    setDateOfBirth('');
+    setParentName('');
+    setParentPhone('');
+    setImageFile(null);
+    setImagePreview(null);
+    setSelectedStop(null);
+    setRfidUid(null);
+    setRfidDuplicate(null);
+    setRfidListening(true);
+  };
 
   return (
-    <div className="student-form">
-      <h2>➕ Thêm Học Sinh Mới</h2>
-
-      {error && <div className="error-message">{error}</div>}
-      {success && <div className="success-message">{success}</div>}
-
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Họ Tên:</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nhập họ tên học sinh"
-            required
-          />
+    <div className="page-container student-form-page">
+      <div className="page-header">
+        <div>
+          <h2 className="page-title">Thêm học sinh</h2>
         </div>
+      </div>
 
-        <div className="form-group">
-          <label>Lớp:</label>
-          <select
-            value={className}
-            onChange={(e) => setClassName(e.target.value)}
-            required
-          >
-            <option value="">Chọn lớp</option>
-            {classes.map(cls => (
-              <option key={cls} value={cls}>
-                {cls}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="form-card">
+        {error   && <div className="alert alert-error">{error}</div>}
+        {success && <div className="alert alert-success">{success}</div>}
 
-        <div className="form-group">
-          <label>Vị Trí (Tùy Chọn):</label>
-          <button
-            type="button"
-            onClick={handleGetLocation}
-            disabled={gettingLocation}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: locationData ? '#10B981' : '#3B82F6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '700',
-              transition: 'all 0.3s',
-            }}
-          >
-            {gettingLocation ? '⏳ Đang lấy GPS...' : locationData ? '✅ GPS lấy được' : '📍 Lấy Vị Trí Hiện Tại'}
-          </button>
-          {locationData && (
-            <p style={{ marginTop: '8px', fontSize: '13px', color: '#10B981' }}>
-              📍 {locationData.lat.toFixed(6)}, {locationData.lng.toFixed(6)} (±{locationData.accuracy.toFixed(0)}m)
-            </p>
-          )}
-        </div>
+        {/* ── RFID Box ── */}
+        <div className={`rfid-box ${rfidUid && !rfidDuplicate ? 'rfid-box--linked' : ''} ${rfidDuplicate ? 'rfid-box--duplicate' : ''}`}>
+          <div className="rfid-box-header">
+            <h3 className="rfid-box-title">
+              <ContactlessIcon />
+              Gán UID
+            </h3>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {rfidUid && (
+                <button type="button" className="btn btn-sm btn-outline" onClick={handleClearRFID}>
+                  Bỏ thẻ
+                </button>
+              )}
+            </div>
+          </div>
 
-        <div className="form-group">
-          <label>Ảnh (Tùy Chọn):</label>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageChange}
-          />
+          {rfidUid ? (
+            <div>
+              {/* UID display */}
+              <div className="rfid-linked">
+                {checkingRfid ? (
+                  <div className="rfid-pulse" style={{ width: 40, height: 40 }}>
+                    <ContactlessIcon style={{ fontSize: 22, color: 'var(--primary)' }} />
+                  </div>
+                ) : rfidDuplicate ? (
+                  <ReportProblemIcon style={{ fontSize: 24, color: 'var(--danger)', flexShrink: 0 }} />
+                ) : (
+                  <CheckCircleIcon style={{ fontSize: 24, color: 'var(--success)', flexShrink: 0 }} />
+                )}
+                <div>
+                  <div className="rfid-uid-label">UID</div>
+                  <div className="rfid-uid-value">
+                    <CreditCardIcon style={{ fontSize: 16 }} />
+                    {rfidUid}
+                  </div>
+                  {!checkingRfid && !rfidDuplicate && (
+                    <div className="rfid-uid-hint">
+                      <LinkIcon style={{ fontSize: 13 }} />
+                      Thẻ chưa đăng ký — sẵn sàng gán cho học sinh mới
+                    </div>
+                  )}
+                </div>
+              </div>
 
-          {imagePreview && (
-            <div className="image-preview">
-              <img src={imagePreview} alt="Preview" />
-              <button
-                type="button"
-                onClick={() => {
-                  setImageFile(null);
-                  setImagePreview(null);
-                }}
-              >
-                Xóa ảnh
-              </button>
+              {/* Duplicate warning */}
+              {!checkingRfid && rfidDuplicate && (
+                <div className="rfid-duplicate-warning">
+                  <ReportProblemIcon style={{ fontSize: 18 }} />
+                  <div>
+                    <div className="rfid-dup-title">Thẻ này đã được đăng ký!</div>
+                    <div className="rfid-dup-detail">
+                      Học sinh: <strong>{rfidDuplicate.name}</strong> — Lớp: <strong>{rfidDuplicate.class}</strong>
+                      {rfidDuplicate.studentId && <> — Mã HS: <strong>{rfidDuplicate.studentId}</strong></>}
+                    </div>
+                    <div className="rfid-dup-hint">
+                      Bỏ thẻ và quét lại thẻ khác, hoặc xóa gán thẻ cũ trước khi tiếp tục.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* ── Waiting state ── */
+            <div className="rfid-waiting">
+              <div className="rfid-pulse">
+                <ContactlessIcon style={{ fontSize: 32, color: 'var(--primary)' }} />
+              </div>
+              <div>
+                <div className="rfid-wait-text">
+                  {rfidListening ? 'Đặt thẻ lên đầu đọc RFID...' : 'Đang chờ tín hiệu từ thiết bị đọc thẻ'}
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        <button type="submit" disabled={loading}>
-          {loading ? '⏳ Đang thêm...' : '➕ Thêm Học Sinh'}
-        </button>
-      </form>
+        <form onSubmit={handleSubmit}>
+          {/* ── Student info ── */}
+          <div className="form-section-title">
+            <BadgeIcon />
+            Thông Tin Học Sinh
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label>Mã Học Sinh</label>
+              <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="hs001" />
+            </div>
+            <div className="form-group">
+              <label>Họ Tên <span className="required">*</span></label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nguyễn Văn An" required />
+            </div>
+            <div className="form-group">
+              <label>Lớp <span className="required">*</span></label>
+              <select value={className} onChange={(e) => setClassName(e.target.value)} required>
+                <option value="">Chọn lớp</option>
+                {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Ngày Tháng Năm Sinh</label>
+              <input
+                type="date"
+                value={toInputDate(dateOfBirth)}
+                onChange={(e) => setDateOfBirth(toVNDate(e.target.value))}
+              />
+            </div>
+          </div>
+
+          {/* ── Parent info ── */}
+          <div className="form-section-title" style={{ marginTop: 24 }}>
+            <FamilyRestroomIcon />
+            Thông Tin Phụ Huynh
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label>Tên Phụ Huynh</label>
+              <input type="text" value={parentName} onChange={(e) => setParentName(e.target.value)} placeholder="Nguyễn Thị Lan" />
+            </div>
+            <div className="form-group">
+              <label>SĐT Phụ Huynh</label>
+              <input type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="0901234567" />
+              {parentPhone.trim() && (
+                <p style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
+                  Tài khoản app sẽ được tạo tự động — mật khẩu mặc định: <strong>123456</strong>
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* ── Photo & Bus Stop ── */}
+          <div className="form-section-title" style={{ marginTop: 24 }}>
+            <PhotoCameraIcon />
+            Ảnh & Trạm Xe
+          </div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label>Ảnh Học Sinh</label>
+              <label className="image-upload-area" style={{ display: 'block', cursor: 'pointer' }}>
+                <input type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
+                {imagePreview ? (
+                  <div className="image-preview-box">
+                    <img src={imagePreview} alt="preview" />
+                    <button type="button" className="btn btn-sm btn-danger" onClick={(e) => { e.preventDefault(); setImageFile(null); setImagePreview(null); }}>
+                      Xóa ảnh
+                    </button>
+                  </div>
+                ) : (
+                  <div className="upload-placeholder">
+                    <ImageIcon style={{ fontSize: 36, color: '#CBD5E1' }} />
+                    <span style={{ fontSize: 13, color: 'var(--text-light)' }}>Nhấn để chọn ảnh</span>
+                  </div>
+                )}
+              </label>
+            </div>
+            <div className="form-group">
+              <label>
+                <DirectionsBusIcon style={{ fontSize: 16, verticalAlign: 'middle', marginRight: 4 }} />
+                Trạm Xe (Tùy Chọn)
+              </label>
+              {busStops.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--text-light)', marginTop: 6 }}>
+                  Chưa có trạm nào được đăng ký. Vào <strong>Quản Lý Trạm Xe</strong> để thêm.
+                </p>
+              ) : (
+                <select
+                  value={selectedStop?.id || ''}
+                  onChange={(e) => handleSelectStop(e.target.value)}
+                >
+                  <option value="">-- Không chọn trạm --</option>
+                  {busStops.map((stop) => (
+                    <option key={stop.id} value={stop.id}>
+                      {stop.order ? `${stop.order}. ` : ''}{stop.name}
+                      {stop.address ? ` — ${stop.address}` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {selectedStop && (
+                <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--primary-pale)', borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--primary)' }}>
+                    <LocationOnIcon style={{ fontSize: 15 }} />
+                    {selectedStop.name}
+                  </div>
+                  {selectedStop.address && (
+                    <div style={{ color: 'var(--text-light)', marginTop: 2 }}>{selectedStop.address}</div>
+                  )}
+                  <div style={{ color: 'var(--text-light)', marginTop: 2, fontFamily: 'monospace', fontSize: 12 }}>
+                    {selectedStop.location.lat.toFixed(5)}, {selectedStop.location.lng.toFixed(5)}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="btn btn-outline" onClick={resetForm}>
+              <RefreshIcon style={{ fontSize: 17 }} />
+              Đặt Lại
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary btn-lg btn-submit-form"
+              disabled={loading || (rfidDuplicate !== null && rfidUid)}
+            >
+              <PersonAddIcon style={{ fontSize: 19 }} />
+              {loading ? 'Đang thêm...' : 'Thêm Học Sinh'}
+            </button>
+          </div>
+          {rfidDuplicate && rfidUid && (
+            <p style={{ color: 'var(--danger)', fontSize: 13, textAlign: 'right', marginTop: 8 }}>
+              Vui lòng bỏ thẻ trùng trước khi lưu
+            </p>
+          )}
+        </form>
+      </div>
     </div>
   );
 };
