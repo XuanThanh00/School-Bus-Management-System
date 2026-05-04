@@ -49,6 +49,7 @@ class StopManager:
         self._reminder_sent: bool         = False
         self._reminder_time: float | None = None
         self._lock = threading.Lock()
+        self.min_board_seconds: int = MIN_BOARD_SECONDS  # updated after load()
 
     # ── Setup ─────────────────────────────────────────────
 
@@ -56,6 +57,21 @@ class StopManager:
         self._stops            = self._cloud.load_stops()
         self._school           = self._cloud.load_school_config()
         self._students_by_stop = self._cloud.load_students_by_stop()
+        self._calc_min_board_seconds()
+
+    def _calc_min_board_seconds(self):
+        """Set min_board_seconds = 80% of travel time from furthest stop to school at 40 km/h."""
+        if not self._stops or not self._school.get("lat"):
+            return
+        s_lat, s_lng = self._school["lat"], self._school["lng"]
+        max_dist = max(
+            self._dist_m(s["lat"], s["lng"], s_lat, s_lng)
+            for s in self._stops
+        )
+        travel_s = (max_dist / 1000.0) / 40.0 * 3600.0
+        self.min_board_seconds = max(60, int(travel_s * 0.8))
+        print(f"  [STOP] min_board_seconds = {self.min_board_seconds}s "
+              f"(xa nhất: {max_dist:.0f}m, 40km/h, 80%)")
 
     # ── Route state ───────────────────────────────────────
 
@@ -259,6 +275,10 @@ class AttendanceSystem:
         # ── Master key state ────────────────────────────────
         self._master_mode  = False
         self._master_until = 0.0
+
+        # ── Debug simulation ─────────────────────────────────
+        self._sim_thread: threading.Thread | None = None
+        self._sim_stop_event = threading.Event()
 
         # ── Display state ───────────────────────────────────
         self._display_status  = "WAITING"
@@ -529,7 +549,7 @@ class AttendanceSystem:
                     break
 
                 if pygame.K_t in debug_keys:
-                    self._teleport_to_current_target()
+                    self._start_sim_drive_to_target()
                 if pygame.K_n in debug_keys and self._stop_mgr:
                     self._stop_mgr._advance()
                     print("  [DEBUG] Force-advanced to next stop")
@@ -606,7 +626,7 @@ class AttendanceSystem:
         # If not boarded yet → boarding flow (wait for face match)
         alight_result = self.att_db.mark_alighted(
             uid_hex,
-            min_board_seconds=MIN_BOARD_SECONDS,
+            min_board_seconds=self._stop_mgr.min_board_seconds if self._stop_mgr else MIN_BOARD_SECONDS,
             gps_lat=self._gps_lat,
             gps_lon=self._gps_lon,
         )
@@ -676,7 +696,7 @@ class AttendanceSystem:
             uid = self._get_uid_by_name(info["full_name"], info["class_name"])
             alight_result = self.att_db.mark_alighted(
                 uid,
-                min_board_seconds=MIN_BOARD_SECONDS,
+                min_board_seconds=self._stop_mgr.min_board_seconds if self._stop_mgr else MIN_BOARD_SECONDS,
                 gps_lat=self._gps_lat,
                 gps_lon=self._gps_lon,
             )
@@ -792,6 +812,13 @@ class AttendanceSystem:
             if k not in seen:
                 self._confirm_tracker[k] = 0
 
+        # Any face in frame → prompt to scan card (cooldown + skip if flow active)
+        if (self._last_results
+                and not self._rfid_pending and not self._face_pending
+                and now >= self._face_prompt_cooldown):
+            self._face_prompt_cooldown = now + FACE_PROMPT_COOLDOWN
+            self.stm32.send_play_audio(TRACK_INVITE_SCAN)
+
         if not best:
             self._display_status  = "WAITING"
             self._display_student = {}
@@ -860,8 +887,8 @@ class AttendanceSystem:
 
     # ── Debug helpers ─────────────────────────────────────
 
-    def _teleport_to_current_target(self):
-        """[DEBUG] T key: set GPS to exactly the current target stop for testing."""
+    def _start_sim_drive_to_target(self):
+        """[DEBUG] T key: simulate bus driving to current target at 50 km/h."""
         if not self._stop_mgr:
             print("  [DEBUG] StopManager not initialized")
             return
@@ -869,21 +896,64 @@ class AttendanceSystem:
         if not target or not target.get("lat"):
             print("  [DEBUG] No target stop available")
             return
-        self._gps_lat   = target["lat"]
-        self._gps_lon   = target["lng"]
-        self._gps_speed = 5.0
-        self._gps_str   = f"[DEBUG] @ {target['name']}"
-        print(f"  [DEBUG] Teleported → {target['name']} "
-              f"({target['lat']:.5f}, {target['lng']:.5f})")
-        threading.Thread(
-            target=self._stop_mgr.on_gps,
-            args=(self._gps_lat, self._gps_lon, self._gps_speed),
+
+        # Stop any running simulation first
+        self._sim_stop_event.set()
+        if self._sim_thread and self._sim_thread.is_alive():
+            self._sim_thread.join(timeout=1.0)
+        self._sim_stop_event.clear()
+
+        self._sim_thread = threading.Thread(
+            target=self._sim_drive_worker,
+            args=(target,),
             daemon=True,
-        ).start()
+        )
+        self._sim_thread.start()
+        print(f"  [DEBUG] Simulating drive → {target['name']} (50 km/h)")
+
+    def _sim_drive_worker(self, target: dict):
+        """Background thread: moves GPS position step by step towards target."""
+        SPEED_KMH = 50.0
+        SPEED_MS  = SPEED_KMH / 3.6   # ~13.89 m/s
+        STEP_S    = 0.5                # update interval
+        STEP_M    = SPEED_MS * STEP_S  # ~6.94 m per step
+
+        # Start position: current GPS or 500 m south of target as fallback
+        lat = self._gps_lat if self._gps_lat is not None else target["lat"] - 0.0045
+        lon = self._gps_lon if self._gps_lon is not None else target["lng"]
+        t_lat, t_lng = target["lat"], target["lng"]
+
+        while not self._sim_stop_event.is_set():
+            dist = StopManager._dist_m(lat, lon, t_lat, t_lng)
+
+            if dist < STOP_ARRIVAL_RADIUS_M:
+                self._gps_lat   = t_lat
+                self._gps_lon   = t_lng
+                self._gps_speed = 0.0
+                self._gps_str   = f"[DEBUG] Arrived @ {target['name']}"
+                if self._stop_mgr:
+                    self._stop_mgr.on_gps(t_lat, t_lng, 0.0)
+                print(f"  [DEBUG] Arrived at '{target['name']}'")
+                break
+
+            ratio = min(STEP_M / dist, 1.0)
+            lat  += (t_lat - lat) * ratio
+            lon  += (t_lng - lon) * ratio
+
+            self._gps_lat   = lat
+            self._gps_lon   = lon
+            self._gps_speed = SPEED_KMH
+            self._gps_str   = f"[DEBUG] → {target['name']} ({dist:.0f}m)"
+
+            if self._stop_mgr:
+                self._stop_mgr.on_gps(lat, lon, SPEED_KMH)
+
+            self._sim_stop_event.wait(STEP_S)
 
     # ── Cleanup & summary ─────────────────────────────────
 
     def _cleanup(self):
+        self._sim_stop_event.set()
         if self.stm32:
             self.stm32.send_shutdown()
             time.sleep(0.3)

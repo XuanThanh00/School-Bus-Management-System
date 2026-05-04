@@ -296,7 +296,7 @@ class CloudSync:
                 "lat":                lat,
                 "lng":                lon,
                 "speed":              round(speed, 1),
-                "isActive":           True,
+                "isActive":           speed >= 5.0,
                 "updatedAt":          int(time.time() * 1000),
                 "routeFromId":        route_from_id,
                 "routeFromName":      route_from_name,
