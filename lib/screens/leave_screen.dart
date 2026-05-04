@@ -66,6 +66,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
   String? _parentDocId;
   String? _studentId;
   String? _studentName;
+  String? _studentClass;
 
   // Request history
   StreamSubscription? _leaveSub;
@@ -114,6 +115,7 @@ class _LeaveScreenState extends State<LeaveScreen> {
           final s = studentSnap.docs.first.data();
           studentName = s['name']?.toString() ?? '';
           studentId   = s['studentId']?.toString() ?? '';
+          _studentClass = s['class']?.toString() ?? '';
         }
       }
 
@@ -201,8 +203,9 @@ class _LeaveScreenState extends State<LeaveScreen> {
           '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
       await FirebaseFirestore.instance.collection('leaveRequests').add({
-        'studentId':   _studentId ?? '',
-        'studentName': _studentName ?? '',
+        'studentId':    _studentId ?? '',
+        'studentName':  _studentName ?? '',
+        'studentClass': _studentClass ?? '',
         'parentId':    _parentDocId ?? '',
         'startDate':   dateStr,
         'endDate':     dateStr,
