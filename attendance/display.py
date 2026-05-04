@@ -132,14 +132,16 @@ class BusDisplay:
                master_sec:    int   = 0,
                rfid_ok:       bool  = True,
                cam_ok:        bool  = True,
-               last_log:      list  = None) -> bool:
-        """Render one frame. Returns False if the user quits."""
+               last_log:      list  = None) -> tuple:
+        """Render one frame. Returns (still_running, set_of_debug_keys_pressed)."""
+        debug_keys = set()
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                return False
+                return False, debug_keys
             if event.type == pygame.KEYDOWN:
                 if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    return False
+                    return False, debug_keys
+                debug_keys.add(event.key)
 
         self._face_status = face_status
         self._face_name   = face_name
@@ -169,7 +171,7 @@ class BusDisplay:
 
         self._render()
         self._clock.tick(FPS_CAP)
-        return True
+        return True, debug_keys
 
     def quit(self):
         pygame.quit()

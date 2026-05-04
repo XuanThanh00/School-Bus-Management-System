@@ -5,6 +5,7 @@ import time
 import threading
 from collections import deque
 
+import pygame
 import numpy as np
 from picamera2 import Picamera2
 
@@ -19,7 +20,8 @@ from .config import (
     HB_PI_INTERVAL, STM32_HB_TIMEOUT,
     FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
     FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL,
-    STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR
+    STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR,
+    STOP_ARRIVAL_RADIUS_M, STOP_WAIT_TIMEOUT_S, STOP_FINAL_WAIT_S,
 )
 from .vision          import (ImagePreprocessor, YuNetDetector,
                                BuffaloRecognizer, FaceDatabase, load_key_info)
@@ -28,6 +30,175 @@ from .overlay         import draw_frame
 from .db              import AttendanceDB
 from .display         import BusDisplay
 from .stm32_protocol  import STM32Protocol, FLAG_GPS_FIX
+
+
+# ──────────────────────────────────────────────────────────
+class StopManager:
+    """Manages route progression through bus stops.
+    Detects arrival, notifies parents, tracks boarding, advances to next stop.
+    """
+
+    def __init__(self, cloud):
+        self._cloud              = cloud
+        self._stops: list        = []   # sorted by order
+        self._school: dict       = {}   # systemConfig/school
+        self._students_by_stop: dict = {}  # stopId → [student dicts]
+        self._current_idx: int   = 0
+        self._arrived: bool      = False
+        self._arrival_time: float | None  = None
+        self._reminder_sent: bool         = False
+        self._reminder_time: float | None = None
+        self._lock = threading.Lock()
+
+    # ── Setup ─────────────────────────────────────────────
+
+    def load(self):
+        self._stops            = self._cloud.load_stops()
+        self._school           = self._cloud.load_school_config()
+        self._students_by_stop = self._cloud.load_students_by_stop()
+
+    # ── Route state ───────────────────────────────────────
+
+    @property
+    def current_target(self) -> dict:
+        with self._lock:
+            idx = self._current_idx
+        return self._stops[idx] if idx < len(self._stops) else self._school
+
+    def get_route_data(self) -> dict:
+        """Return current route fields for push_gps()."""
+        with self._lock:
+            arrived = self._arrived
+            idx     = self._current_idx
+
+        target    = self._stops[idx] if idx < len(self._stops) else self._school
+        prev_idx  = idx - 1
+        from_stop = self._stops[prev_idx] if 0 <= prev_idx < len(self._stops) else {}
+
+        return {
+            "route_from_id":      from_stop.get("id", ""),
+            "route_from_name":    from_stop.get("name", ""),
+            "route_to_id":        target.get("id", ""),
+            "route_to_name":      target.get("name", ""),
+            "reached_destination": arrived,
+        }
+
+    # ── GPS callback (called on every GPS packet) ─────────
+
+    def on_gps(self, lat: float, lon: float, speed: float):
+        with self._lock:
+            idx = self._current_idx
+
+        if not self._stops and not self._school:
+            return
+
+        target = self._stops[idx] if idx < len(self._stops) else self._school
+        if not target.get("lat"):
+            return
+
+        dist = self._dist_m(lat, lon, target["lat"], target["lng"])
+        now  = time.time()
+
+        with self._lock:
+            arrived      = self._arrived
+            arrival_time = self._arrival_time
+            reminder_sent = self._reminder_sent
+            reminder_time = self._reminder_time
+
+        # ── Detect first arrival ──
+        if dist < STOP_ARRIVAL_RADIUS_M and not arrived:
+            with self._lock:
+                self._arrived      = True
+                self._arrival_time = now
+                self._reminder_sent = False
+            arrived      = True
+            arrival_time = now
+
+            stop_id  = target.get("id", "")
+            students = self._students_by_stop.get(stop_id, [])
+            if students:
+                threading.Thread(
+                    target=self._cloud.send_stop_arrival_fcm,
+                    args=(target["name"], list(students)),
+                    daemon=True,
+                ).start()
+            # [COMMENTED OUT] play_audio("arrived_at_stop.mp3")
+            print(f"  [STOP] Arrived at '{target['name']}' ({dist:.0f} m)")
+
+        if not arrived:
+            return
+
+        # ── Check boarding status ──
+        stop_id  = target.get("id", "")
+        students = self._students_by_stop.get(stop_id, [])
+        active   = [s for s in students if s.get("attendanceStatus") != "absent"]
+        missing  = [s for s in active   if s.get("attendanceStatus") == "not_boarded"]
+
+        if not missing:
+            # All active students boarded (or no active students at this stop)
+            # [COMMENTED OUT] play_audio("all_boarded.mp3")
+            if idx < len(self._stops):   # don't advance past school
+                self._advance()
+            return
+
+        if arrival_time and (now - arrival_time) > STOP_WAIT_TIMEOUT_S:
+            if not reminder_sent:
+                with self._lock:
+                    self._reminder_sent = True
+                    self._reminder_time = now
+                threading.Thread(
+                    target=self._cloud.send_waiting_fcm,
+                    args=(target["name"], list(missing)),
+                    daemon=True,
+                ).start()
+                # [COMMENTED OUT] play_audio("students_missing.mp3")
+                print(f"  [STOP] Reminder sent: {len(missing)} missing at '{target['name']}'")
+                reminder_time = now
+            elif reminder_time and (now - reminder_time) > STOP_FINAL_WAIT_S:
+                print(f"  [STOP] Final timeout — leaving '{target['name']}' with {len(missing)} absent")
+                self._advance()
+
+    # ── RFID boarding callback ────────────────────────────
+
+    def on_student_boarded(self, student_id: str):
+        """Update in-memory status when a student boards via RFID+face."""
+        for students in self._students_by_stop.values():
+            for s in students:
+                if s.get("studentId") == student_id:
+                    s["attendanceStatus"] = "boarded"
+                    return
+
+    # ── Helpers ───────────────────────────────────────────
+
+    def _advance(self):
+        with self._lock:
+            prev_idx           = self._current_idx
+            self._current_idx += 1
+            self._arrived      = False
+            self._arrival_time  = None
+            self._reminder_sent = False
+            self._reminder_time = None
+            new_idx = self._current_idx
+
+        prev_name = (self._stops[prev_idx]["name"]
+                     if prev_idx < len(self._stops)
+                     else self._school.get("name", "?"))
+        if new_idx < len(self._stops):
+            next_name = self._stops[new_idx]["name"]
+        else:
+            next_name = self._school.get("name", "Trường")
+        print(f"  [STOP] → {prev_name} → {next_name}")
+
+    @staticmethod
+    def _dist_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        import math
+        R = 6_371_000.0
+        p = math.pi / 180
+        a = (0.5
+             - math.cos((lat2 - lat1) * p) / 2
+             + math.cos(lat1 * p) * math.cos(lat2 * p)
+             * (1 - math.cos((lon2 - lon1) * p)) / 2)
+        return 2 * R * math.asin(math.sqrt(a))
 
 
 # ──────────────────────────────────────────────────────────
@@ -54,6 +225,7 @@ class AttendanceSystem:
 
         # Cloud Sync
         self._cloud = None
+        self._stop_mgr: StopManager | None = None
         self._last_gps_push = 0.0   # throttle GPS push
 
         # ── STM32 / system state ────────────────────────────
@@ -222,8 +394,12 @@ class AttendanceSystem:
                 else:
                     print("  ✓ Embedding giữ nguyên (không cần rebuild)")
 
-            # Reset attendanceStatus cho web admin
+            # Reset attendanceStatus (preserves "absent" for leave-approved students)
             self._cloud.reset_all_attendance_status()
+
+            # Load stops and school, build stop manager
+            self._stop_mgr = StopManager(self._cloud)
+            self._stop_mgr.load()
 
     # ── STM32 callbacks (run in STM32Protocol RX thread) ──
 
@@ -252,6 +428,12 @@ class AttendanceSystem:
         self._gps_lon   = lon
         self._gps_speed = speed
         self._gps_str   = f"GPS: {lat:.5f}, {lon:.5f} | {speed:.0f} km/h"
+        if self._stop_mgr:
+            threading.Thread(
+                target=self._stop_mgr.on_gps,
+                args=(lat, lon, speed),
+                daemon=True,
+            ).start()
 
     def _on_gps_no_fix(self, sat_count: int):
         self._gps_str = f"GPS: no fix (sat={sat_count})"
@@ -289,9 +471,11 @@ class AttendanceSystem:
                         and self._gps_lat is not None
                         and now - self._last_gps_push >= GPS_PUSH_INTERVAL):
                     lat, lon, spd = self._gps_lat, self._gps_lon, self._gps_speed
+                    route = self._stop_mgr.get_route_data() if self._stop_mgr else {}
                     threading.Thread(
                         target=self._cloud.push_gps,
                         args=(lat, lon, spd),
+                        kwargs=route,
                         daemon=True,
                     ).start()
                     self._last_gps_push = now
@@ -322,7 +506,7 @@ class AttendanceSystem:
                 )
 
                 present, total = self.att_db.get_attendance_count()
-                still_running = self._display.update(
+                still_running, debug_keys = self._display.update(
                     frame_bgr    = frame_out,
                     face_status  = self._display_status,
                     face_name    = self._display_student.get("name", ""),
@@ -343,6 +527,12 @@ class AttendanceSystem:
                 )
                 if not still_running:
                     break
+
+                if pygame.K_t in debug_keys:
+                    self._teleport_to_current_target()
+                if pygame.K_n in debug_keys and self._stop_mgr:
+                    self._stop_mgr._advance()
+                    print("  [DEBUG] Force-advanced to next stop")
 
         finally:
             self._cleanup()
@@ -551,6 +741,9 @@ class AttendanceSystem:
                 daemon=True,
             ).start()
 
+            if self._stop_mgr and (student_id or id_key):
+                self._stop_mgr.on_student_boarded(student_id or id_key)
+
     def _record_alighted(self, uid_hex: str, full_name: str, class_name: str):
         """Record alighting event and push to cloud (called from RFID handler thread)."""
         ts = time.strftime("%H:%M:%S")
@@ -664,6 +857,29 @@ class AttendanceSystem:
             if name.startswith(full_name):
                 return ts
         return ""
+
+    # ── Debug helpers ─────────────────────────────────────
+
+    def _teleport_to_current_target(self):
+        """[DEBUG] T key: set GPS to exactly the current target stop for testing."""
+        if not self._stop_mgr:
+            print("  [DEBUG] StopManager not initialized")
+            return
+        target = self._stop_mgr.current_target
+        if not target or not target.get("lat"):
+            print("  [DEBUG] No target stop available")
+            return
+        self._gps_lat   = target["lat"]
+        self._gps_lon   = target["lng"]
+        self._gps_speed = 5.0
+        self._gps_str   = f"[DEBUG] @ {target['name']}"
+        print(f"  [DEBUG] Teleported → {target['name']} "
+              f"({target['lat']:.5f}, {target['lng']:.5f})")
+        threading.Thread(
+            target=self._stop_mgr.on_gps,
+            args=(self._gps_lat, self._gps_lon, self._gps_speed),
+            daemon=True,
+        ).start()
 
     # ── Cleanup & summary ─────────────────────────────────
 

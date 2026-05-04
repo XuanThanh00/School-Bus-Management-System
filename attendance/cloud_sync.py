@@ -143,23 +143,50 @@ class CloudSync:
             return [], False
 
     def reset_all_attendance_status(self):
-        """Reset attendanceStatus → 'not_boarded' for all students (called on trip start)."""
+        """Reset attendanceStatus for all students.
+        Students with an approved leave request covering today keep 'absent'.
+        All others are reset to 'not_boarded'.
+        Requires Firestore composite index: leaveRequests (status + startDate + endDate).
+        """
         if not self.initialized:
             return
         try:
+            today = time.strftime('%Y-%m-%d')
+
+            # Step 1: collect studentIds with approved leave covering today
+            leave_docs = (
+                self.fs_db.collection("leaveRequests")
+                .where("status",    "==", "approved")
+                .where("startDate", "<=", today)
+                .where("endDate",   ">=", today)
+                .stream()
+            )
+            absent_ids = {d.to_dict().get("studentId") for d in leave_docs}
+            if absent_ids:
+                print(f"  [CLOUD] {len(absent_ids)} student(s) on approved leave today → keeping 'absent'")
+
+            # Step 2: batch-update all students
             docs  = list(self.fs_db.collection("students").stream())
-            count = 0
-            # Firestore batch limit: 500 ops per commit
             batch = self.fs_db.batch()
+            count = 0
             for doc in docs:
-                batch.update(doc.reference, {"attendanceStatus": "not_boarded"})
+                student_id = doc.to_dict().get("studentId", "")
+                if student_id in absent_ids:
+                    new_status = "absent"
+                else:
+                    new_status = "not_boarded"
+                batch.update(doc.reference, {
+                    "attendanceStatus":    new_status,
+                    "attendanceUpdatedAt": firestore.SERVER_TIMESTAMP,
+                })
                 count += 1
                 if count % 500 == 0:
                     batch.commit()
                     batch = self.fs_db.batch()
             if count % 500 != 0:
                 batch.commit()
-            print(f"  [CLOUD] ✓ Reset attendanceStatus → not_boarded ({count} students)")
+            print(f"  [CLOUD] ✓ Reset attendanceStatus ({count} students, "
+                  f"{len(absent_ids)} absent)")
         except Exception as e:
             print(f"  [CLOUD] Error resetting attendanceStatus: {e}")
 
@@ -257,16 +284,129 @@ class CloudSync:
 
     # ── Realtime Database ──────────────────────────────────
 
-    def push_gps(self, lat: float, lon: float, speed: float):
-        if not self.initialized: return
+    def push_gps(self, lat: float, lon: float, speed: float,
+                 route_from_id: str = "", route_from_name: str = "",
+                 route_to_id: str = "", route_to_name: str = "",
+                 reached_destination: bool = False):
+        if not self.initialized:
+            return
         try:
             ref = self.rt_db.reference("bus/gps")
             ref.update({
-                "lat":       lat,
-                "lng":       lon,
-                "speed":     round(speed, 1),
-                "isActive":  True,
-                "updatedAt": int(time.time() * 1000),
+                "lat":                lat,
+                "lng":                lon,
+                "speed":              round(speed, 1),
+                "isActive":           True,
+                "updatedAt":          int(time.time() * 1000),
+                "routeFromId":        route_from_id,
+                "routeFromName":      route_from_name,
+                "routeToId":          route_to_id,
+                "routeToName":        route_to_name,
+                "reachedDestination": reached_destination,
+                "deviceId":           "bus-01",
+                "source":             "pi",
             })
         except Exception as e:
             print(f"  [CLOUD] Error pushing GPS: {e}")
+
+    # ── Bus stops & route ──────────────────────────────────
+
+    def load_stops(self) -> list:
+        """Load active busStops from Firestore, sorted by order."""
+        if not self.initialized:
+            return []
+        try:
+            docs = (
+                self.fs_db.collection("busStops")
+                .where("isActive", "==", True)
+                .order_by("order")
+                .stream()
+            )
+            stops = []
+            for d in docs:
+                data = d.to_dict()
+                loc  = data.get("location", {})
+                stops.append({
+                    "id":    d.id,
+                    "name":  data.get("name", ""),
+                    "order": data.get("order", 0),
+                    "lat":   loc.get("lat", 0.0),
+                    "lng":   loc.get("lng", 0.0),
+                })
+            print(f"  [CLOUD] ✓ Loaded {len(stops)} bus stops")
+            return stops
+        except Exception as e:
+            print(f"  [CLOUD] Error loading stops: {e}")
+            return []
+
+    def load_school_config(self) -> dict:
+        """Load school location from systemConfig/school (flat lat/lng fields)."""
+        if not self.initialized:
+            return {}
+        try:
+            doc = self.fs_db.collection("systemConfig").document("school").get()
+            if doc.exists:
+                data = doc.to_dict()
+                result = {
+                    "id":   "school",
+                    "name": data.get("name", "Trường"),
+                    "lat":  data.get("lat", 0.0),
+                    "lng":  data.get("lng", 0.0),
+                }
+                print(f"  [CLOUD] ✓ School: {result['name']} ({result['lat']:.4f}, {result['lng']:.4f})")
+                return result
+            print("  [CLOUD] ⚠ systemConfig/school not found")
+            return {}
+        except Exception as e:
+            print(f"  [CLOUD] Error loading school config: {e}")
+            return {}
+
+    def load_students_by_stop(self) -> dict:
+        """Load all students grouped by busStopId (includes absent students)."""
+        if not self.initialized:
+            return {}
+        try:
+            docs   = self.fs_db.collection("students").stream()
+            result = {}
+            for doc in docs:
+                d       = doc.to_dict()
+                stop_id = d.get("busStopId", "")
+                if not stop_id:
+                    continue
+                result.setdefault(stop_id, []).append({
+                    "studentId":        d.get("studentId", ""),
+                    "name":             d.get("name", ""),
+                    "attendanceStatus": d.get("attendanceStatus", "not_boarded"),
+                })
+            total = sum(len(v) for v in result.values())
+            print(f"  [CLOUD] ✓ Loaded {total} students across {len(result)} stops")
+            return result
+        except Exception as e:
+            print(f"  [CLOUD] Error loading students by stop: {e}")
+            return {}
+
+    def send_stop_arrival_fcm(self, stop_name: str, students_at_stop: list):
+        """Notify parents that the bus has arrived at their stop (skip absent)."""
+        for stu in students_at_stop:
+            if stu.get("attendanceStatus") == "absent":
+                continue
+            student_id = stu.get("studentId")
+            if not student_id:
+                continue
+            self.send_fcm(
+                student_id,
+                title=f"Xe đã đến trạm {stop_name}",
+                body="Vui lòng đưa con ra xe",
+            )
+
+    def send_waiting_fcm(self, stop_name: str, missing_students: list):
+        """Notify parents of students not yet boarded after first timeout."""
+        for stu in missing_students:
+            student_id = stu.get("studentId")
+            if not student_id:
+                continue
+            self.send_fcm(
+                student_id,
+                title=f"Xe đang chờ tại trạm {stop_name}",
+                body="Con chưa lên xe, xe sẽ tiếp tục sau ít phút",
+            )
