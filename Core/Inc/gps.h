@@ -1,38 +1,25 @@
-/*
- * gps.h
- *
- *  Created on: Apr 7, 2026
- *      Author: Thanh
- */
-
-#ifndef INC_GPS_H_
-#define INC_GPS_H_
+#ifndef GPS_H
+#define GPS_H
 
 #include "stm32f1xx_hal.h"
 #include <stdint.h>
 #include <stdbool.h>
 
-#define GPS_DMA_BUF_SIZE  256
+#define GPS_DMA_BUF_SIZE  256U
+#define GPS_LINE_BUF_SIZE 128U
+#define GPS_STALE_MS      3000U  /* Data older than this is treated as invalid */
 
 typedef struct {
-    /* Vị trí */
-    float    latitude;       // + = Bắc, - = Nam
-    float    longitude;      // + = Đông, - = Tây
-    float    altitude;       // mét
-
-    /* Tín hiệu */
-    uint8_t  satellites;
+    float    latitude;        /* Decimal degrees, positive = North */
+    float    longitude;       /* Decimal degrees, positive = East  */
+    float    altitude;        /* Metres above sea level            */
+    float    speed_kmh;
     float    hdop;
-    bool     fix_valid;
-
-    /* Thời gian UTC */
+    uint8_t  satellites;
     uint8_t  hour;
     uint8_t  minute;
     uint8_t  second;
-
-    /* Tốc độ */
-    float    speed_kmh;
-
+    bool     fix_valid;
     uint32_t last_update_tick;
 } GPS_Data;
 
@@ -40,18 +27,13 @@ typedef struct {
     UART_HandleTypeDef *huart;
     uint8_t  dma_buf[GPS_DMA_BUF_SIZE];
     uint16_t parse_pos;
-    char     line_buf[128];
+    char     line_buf[GPS_LINE_BUF_SIZE];
     uint8_t  line_len;
     GPS_Data data;
 } GPS_Handle;
 
-/* ── Init: gọi 1 lần trong main ── */
-void GPS_Init(GPS_Handle *h, UART_HandleTypeDef *huart);
+void GPS_Init   (GPS_Handle *h, UART_HandleTypeDef *huart);
+bool GPS_Update (GPS_Handle *h);            /* Returns true when a new sentence is parsed */
+bool GPS_IsValid(const GPS_Handle *h);      /* fix_valid AND data age < GPS_STALE_MS      */
 
-/* ── Update: gọi trong while(1), trả về true nếu có data mới ── */
-bool GPS_Update(GPS_Handle *h);
-
-/* ── Helpers ── */
-bool GPS_IsValid(GPS_Handle *h);   // có fix + data < 3s
-
-#endif /* INC_GPS_H_ */
+#endif /* GPS_H */
