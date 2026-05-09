@@ -1,0 +1,12 @@
+../Core/Src/app_tasks.c:20:16:_build_flags	16	static
+../Core/Src/app_tasks.c:33:13:_send_gps_or_nofix	56	static
+../Core/Src/app_tasks.c:50:13:cb_play_audio	24	static
+../Core/Src/app_tasks.c:56:13:cb_set_volume	24	static
+../Core/Src/app_tasks.c:62:13:cb_request_gps	8	static
+../Core/Src/app_tasks.c:67:13:cb_hb_pi	8	static
+../Core/Src/app_tasks.c:74:13:cb_shutdown	4	static
+../Core/Src/app_tasks.c:78:13:cb_ack	16	static
+../Core/Src/app_tasks.c:87:6:Task_Comm	40	static
+../Core/Src/app_tasks.c:168:6:Task_Gps	32	static
+../Core/Src/app_tasks.c:191:6:Task_Rfid	48	static
+../Core/Src/app_tasks.c:225:6:Task_Audio	24	static

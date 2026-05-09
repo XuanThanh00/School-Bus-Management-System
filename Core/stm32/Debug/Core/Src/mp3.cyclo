@@ -1,0 +1,7 @@
+../Core/Src/mp3.c:21:13:_send	3
+../Core/Src/mp3.c:45:6:MP3_Init	1
+../Core/Src/mp3.c:55:6:MP3_PlayTrack	1
+../Core/Src/mp3.c:61:6:MP3_SetVolume	2
+../Core/Src/mp3.c:67:6:MP3_Stop	1
+../Core/Src/mp3.c:68:6:MP3_Pause	1
+../Core/Src/mp3.c:69:6:MP3_Resume	1

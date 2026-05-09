@@ -1,0 +1,6 @@
+../Drivers/CMSIS/Include/core_cm3.h:1762:34:__NVIC_SystemReset	1
+../Core/Src/rtos_objects.c:54:13:_cb_iwdg	3
+../Core/Src/rtos_objects.c:63:13:_cb_hb	1
+../Core/Src/rtos_objects.c:70:13:_cb_gps	1
+../Core/Src/rtos_objects.c:76:6:vApplicationStackOverflowHook	0
+../Core/Src/rtos_objects.c:84:6:RTOS_ObjectsInit	1

@@ -1,0 +1,13 @@
+../Core/Src/uart_protocol.c:5:16:_crc8	2
+../Core/Src/uart_protocol.c:11:13:_send_packet	2
+../Core/Src/uart_protocol.c:28:13:_dispatch	16
+../Core/Src/uart_protocol.c:60:13:_process_byte	11
+../Core/Src/uart_protocol.c:113:6:Proto_Init	1
+../Core/Src/uart_protocol.c:121:6:Proto_RxISR	2
+../Core/Src/uart_protocol.c:131:6:Proto_Update	2
+../Core/Src/uart_protocol.c:141:6:Proto_SendReady	1
+../Core/Src/uart_protocol.c:145:6:Proto_SendRfidUID	1
+../Core/Src/uart_protocol.c:149:6:Proto_SendGpsData	1
+../Core/Src/uart_protocol.c:157:6:Proto_SendGpsNoFix	1
+../Core/Src/uart_protocol.c:161:6:Proto_SendHbStm32	1
+../Core/Src/uart_protocol.c:165:6:Proto_SendAck	1

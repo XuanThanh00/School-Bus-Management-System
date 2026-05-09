@@ -1,0 +1,6 @@
+../Drivers/CMSIS/Include/core_cm3.h:1762:34:__NVIC_SystemReset	4	static,ignoring_inline_asm
+../Core/Src/rtos_objects.c:54:13:_cb_iwdg	16	static
+../Core/Src/rtos_objects.c:63:13:_cb_hb	16	static
+../Core/Src/rtos_objects.c:70:13:_cb_gps	16	static
+../Core/Src/rtos_objects.c:76:6:vApplicationStackOverflowHook	16	static
+../Core/Src/rtos_objects.c:84:6:RTOS_ObjectsInit	32	static

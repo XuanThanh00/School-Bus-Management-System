@@ -1,0 +1,7 @@
+../Core/Src/mp3.c:21:13:_send	32	static
+../Core/Src/mp3.c:45:6:MP3_Init	24	static
+../Core/Src/mp3.c:55:6:MP3_PlayTrack	16	static
+../Core/Src/mp3.c:61:6:MP3_SetVolume	16	static
+../Core/Src/mp3.c:67:6:MP3_Stop	16	static
+../Core/Src/mp3.c:68:6:MP3_Pause	16	static
+../Core/Src/mp3.c:69:6:MP3_Resume	16	static

@@ -1,0 +1,14 @@
+../Core/Src/rc522.c:41:13:_dbg	108	static
+../Core/Src/rc522.c:52:20:_cs_low	16	static
+../Core/Src/rc522.c:53:20:_cs_high	16	static
+../Core/Src/rc522.c:55:13:_write_reg	24	static
+../Core/Src/rc522.c:62:16:_read_reg	24	static
+../Core/Src/rc522.c:72:13:_set_bits	16	static
+../Core/Src/rc522.c:73:13:_clr_bits	16	static
+../Core/Src/rc522.c:74:13:_flush_fifo	16	static
+../Core/Src/rc522.c:77:21:_calc_crc	40	static
+../Core/Src/rc522.c:100:21:_transceive	40	static
+../Core/Src/rc522.c:136:6:RC522_Init	32	static
+../Core/Src/rc522.c:176:14:RC522_ReadUID	72	static
+../Core/Src/rc522.c:222:6:RC522_UIDtoString	24	static
+../Core/Src/rc522.c:228:6:RC522_UIDEqual	16	static
