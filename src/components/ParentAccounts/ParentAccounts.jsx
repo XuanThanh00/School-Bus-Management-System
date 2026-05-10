@@ -105,23 +105,10 @@ const ParentAccounts = () => {
     <div className="page-container">
       <div className="page-header">
         <div>
-          <h2 className="page-title">Tài Khoản Phụ Huynh</h2>
-          <p className="page-subtitle">Quản lý tài khoản phụ huynh đăng nhập trên mobile app</p>
+          <h2 className="page-title">Tài khoản phụ huynh</h2>
         </div>
       </div>
 
-      <div className="info-box info-box-blue" style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <InfoIcon style={{ color: 'var(--primary)', flexShrink: 0, marginTop: 2 }} />
-          <div>
-            <h4>Hướng Dẫn Đăng Nhập App</h4>
-            <p>
-              Phụ huynh dùng <strong>Số điện thoại</strong> + <strong>Mật khẩu mặc định 123456</strong> để đăng nhập BusAttend mobile app.
-              Tài khoản được tự động tạo khi thêm học sinh có SĐT phụ huynh.
-            </p>
-          </div>
-        </div>
-      </div>
 
       {success && <div className="alert alert-success">{success}</div>}
       {error && <div className="alert alert-error">{error}</div>}

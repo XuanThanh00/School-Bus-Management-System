@@ -293,12 +293,6 @@ const MainTable = () => {
           
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {busGps && (
-            <span className="bus-status-chip">
-              <DirectionsBusIcon style={{ fontSize: 20 }} />
-              {isMoving ? 'Xe đang di chuyển' : 'Xe đang dừng'}
-            </span>
-          )}
           <button className="btn btn-outline btn-sm" onClick={handleResetDay} title="Reset điểm danh ngày mới">
             <RefreshIcon style={{ fontSize: 30 }} />
             Reset

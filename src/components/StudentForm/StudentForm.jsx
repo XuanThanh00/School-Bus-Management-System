@@ -24,31 +24,13 @@ import LinkIcon from '@mui/icons-material/Link';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import './StudentForm.css';
 
-const CLASSES = [
-  '1A1','1A2','1A3','1B1','1B2',
-  '2A1','2A2','2A3','2B1','2B2',
-  '3A1','3A2','3A3','3B1','3B2',
-  '4A1','4A2','4A3','4B1','4B2',
-];
 
-const generateStudentId = () => `hs${Date.now().toString().slice(-5)}`;
-
-const toInputDate = (vn) => {
-  if (!vn) return '';
-  const [d, m, y] = vn.split('/');
-  return (d && m && y) ? `${y}-${m}-${d}` : '';
-};
-
-const toVNDate = (iso) => {
-  if (!iso) return '';
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
-};
+const isValidVNDate = (val) => /^\d{2}\/\d{2}\/\d{4}$/.test(val);
 
 const StudentForm = () => {
   const { currentUser } = useAuth();
 
-  const [studentId, setStudentId]     = useState(generateStudentId());
+  const [studentId, setStudentId]     = useState('');
   const [name, setName]               = useState('');
   const [className, setClassName]     = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
@@ -136,10 +118,15 @@ const StudentForm = () => {
     setError('');
     setSuccess('');
 
-    if (!name.trim() || !className) {
-      setError('Vui lòng điền họ tên và chọn lớp');
-      return;
-    }
+    if (!studentId.trim())            { setError('Vui lòng điền mã học sinh'); return; }
+    if (!name.trim())                  { setError('Vui lòng điền họ tên học sinh'); return; }
+    if (!className)                    { setError('Vui lòng chọn lớp'); return; }
+    if (!dateOfBirth.trim())           { setError('Vui lòng điền ngày sinh'); return; }
+    if (!isValidVNDate(dateOfBirth))   { setError('Ngày sinh không hợp lệ — nhập theo định dạng DD/MM/YYYY'); return; }
+    if (!parentName.trim())            { setError('Vui lòng điền tên phụ huynh'); return; }
+    if (!parentPhone.trim())           { setError('Vui lòng điền SĐT phụ huynh'); return; }
+    if (!imageFile)                    { setError('Vui lòng chọn ảnh học sinh'); return; }
+    if (!selectedStop)                 { setError('Vui lòng chọn trạm xe'); return; }
 
     setLoading(true);
     try {
@@ -188,7 +175,7 @@ const StudentForm = () => {
   };
 
   const resetForm = () => {
-    setStudentId(generateStudentId());
+    setStudentId('');
     setName('');
     setClassName('');
     setDateOfBirth('');
@@ -298,8 +285,8 @@ const StudentForm = () => {
           </div>
           <div className="form-grid-2">
             <div className="form-group">
-              <label>Mã Học Sinh</label>
-              <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="hs001" />
+              <label>Mã Học Sinh <span className="required">*</span></label>
+              <input type="text" value={studentId} onChange={(e) => setStudentId(e.target.value)} placeholder="hs001" required />
             </div>
             <div className="form-group">
               <label>Họ Tên <span className="required">*</span></label>
@@ -307,17 +294,17 @@ const StudentForm = () => {
             </div>
             <div className="form-group">
               <label>Lớp <span className="required">*</span></label>
-              <select value={className} onChange={(e) => setClassName(e.target.value)} required>
-                <option value="">Chọn lớp</option>
-                {CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <input type="text" value={className} onChange={(e) => setClassName(e.target.value)} placeholder="VD: 4B1" required />
             </div>
             <div className="form-group">
-              <label>Ngày Tháng Năm Sinh</label>
+              <label>Ngày Tháng Năm Sinh <span className="required">*</span></label>
               <input
-                type="date"
-                value={toInputDate(dateOfBirth)}
-                onChange={(e) => setDateOfBirth(toVNDate(e.target.value))}
+                type="text"
+                value={dateOfBirth}
+                onChange={(e) => setDateOfBirth(e.target.value)}
+                placeholder="DD/MM/YYYY"
+                maxLength={10}
+                required
               />
             </div>
           </div>
@@ -329,12 +316,12 @@ const StudentForm = () => {
           </div>
           <div className="form-grid-2">
             <div className="form-group">
-              <label>Tên Phụ Huynh</label>
-              <input type="text" value={parentName} onChange={(e) => setParentName(e.target.value)} placeholder="Nguyễn Thị Lan" />
+              <label>Tên Phụ Huynh <span className="required">*</span></label>
+              <input type="text" value={parentName} onChange={(e) => setParentName(e.target.value)} placeholder="Nguyễn Thị Lan" required />
             </div>
             <div className="form-group">
-              <label>SĐT Phụ Huynh</label>
-              <input type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="0901234567" />
+              <label>SĐT Phụ Huynh <span className="required">*</span></label>
+              <input type="tel" value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} placeholder="0901234567" required />
               {parentPhone.trim() && (
                 <p style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4 }}>
                   Tài khoản app sẽ được tạo tự động — mật khẩu mặc định: <strong>123456</strong>
@@ -350,7 +337,7 @@ const StudentForm = () => {
           </div>
           <div className="form-grid-2">
             <div className="form-group">
-              <label>Ảnh Học Sinh</label>
+              <label>Ảnh Học Sinh <span className="required">*</span></label>
               <label className="image-upload-area" style={{ display: 'block', cursor: 'pointer' }}>
                 <input type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
                 {imagePreview ? (
@@ -371,7 +358,7 @@ const StudentForm = () => {
             <div className="form-group">
               <label>
                 <DirectionsBusIcon style={{ fontSize: 16, verticalAlign: 'middle', marginRight: 4 }} />
-                Trạm Xe (Tùy Chọn)
+                Trạm Xe <span className="required">*</span>
               </label>
               {busStops.length === 0 ? (
                 <p style={{ fontSize: 13, color: 'var(--text-light)', marginTop: 6 }}>

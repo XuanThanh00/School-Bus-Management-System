@@ -7,8 +7,6 @@ import MapView from '../components/MapView/MapView';
 import BusStops from '../components/BusStops/BusStops';
 import LeaveRequests from '../components/LeaveRequests/LeaveRequests';
 import ParentAccounts from '../components/ParentAccounts/ParentAccounts';
-import GpsDemoPage from './GpsDemoPage';
-
 const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const [activeView, setActiveView] = useState(searchParams.get('view') || 'list');
@@ -21,8 +19,7 @@ const Dashboard = () => {
       case 'busstops':      return <BusStops />;
       case 'leaverequests': return <LeaveRequests />;
       case 'parents':       return <ParentAccounts />;
-      case 'gpsdemo':       return <GpsDemoPage embedded />;
-      default:              return <MainTable />;
+default:              return <MainTable />;
     }
   };
 

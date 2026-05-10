@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { isOnApprovedLeaveToday } from './leaveBufferService';
+import { deleteParentRecord } from './authService';
 
 // Convert image file to Base64
 const fileToBase64 = (file) => {
@@ -87,7 +88,7 @@ export const deleteStudent = async (firestoreDocId) => {
         (id) => id !== student.studentId,
       );
       if (remaining.length === 0) {
-        await deleteDoc(parentDoc.ref);
+        await deleteParentRecord(parentDoc.id);
       } else {
         await updateDoc(parentDoc.ref, { studentIds: arrayRemove(student.studentId) });
       }

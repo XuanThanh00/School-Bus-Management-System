@@ -10,13 +10,14 @@
 .sidebar::-webkit-scrollbar-thumb  { background: rgba(255,255,255,.2); border-radius: 4px; }
 
 /* ── Brand ── */
-.brand-icon svg {
-  font-size: 40px;
-  color: white;
+.brand-icon img {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
 }
 .brand-name {
-  font-size: 35px;
-  font-weight: 700;
+  font-size: 32px;
+  font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.2;
 }
@@ -29,19 +30,17 @@
 }
 
 /* ── User info ── */
-
 .user-name {
-  font-size: 34px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .user-email {
-  font-size: 100px;
-  opacity: .5;
+  font-size: 15px;
+  opacity: .6;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -50,13 +49,13 @@
 
 /* ── Nav section label ── */
 .nav-section-label {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   opacity: .35;
   margin-bottom: 6px;
-  padding-left: 2px;
+  padding-left: 4px;
 }
 
 /* ── Nav icon wrapper ── */
@@ -64,8 +63,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 48px;
   border-radius: 8px;
   flex-shrink: 0;
   transition: background .15s;
@@ -77,12 +76,12 @@
   background: rgba(255,255,255,.1);
 }
 .nav-btn .nav-icon svg {
-  font-size: 19px;
+  font-size: 30px;
 }
 
 /* ── Nav label ── */
 .nav-label {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -90,20 +89,20 @@
   text-overflow: ellipsis;
 }
 .nav-btn.active .nav-label {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* Active indicator — left inset bar */
 .nav-btn.active {
-  box-shadow: inset 3px 0 0 rgba(255,255,255,.85);
+  box-shadow: inset 4px 0 0 rgba(255,255,255,.85);
 }
 
 /* ── Logout button ── */
 .sidebar-footer .logout-btn {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 20px;
+  gap: 10px;
+  font-size: 22px;
   font-weight: 500;
   letter-spacing: -0.01em;
   opacity: .6;
@@ -118,5 +117,5 @@
   opacity: .95;
 }
 .sidebar-footer .logout-btn svg {
-  font-size: 18px;
+  font-size: 30px;
 }

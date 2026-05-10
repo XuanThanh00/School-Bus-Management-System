@@ -105,7 +105,7 @@ const LoginPage = () => {
         {/* ── Left: illustration ── */}
         <div className="auth-left">
           <div className="auth-left-brand">
-            <div className="auth-left-logo">B</div>
+            <div className="auth-left-logo"><img src="/logo/front-of-bus.png" alt="BusAttend" /></div>
             <span className="auth-left-appname">BusAttend</span>
           </div>
           <BusIllustration />

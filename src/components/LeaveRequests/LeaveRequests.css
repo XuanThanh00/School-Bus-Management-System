@@ -12,7 +12,7 @@
   gap: 8px;
   padding: 10px 20px;
   border-radius: 10px;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 500;
 }
 .leave-stat.approved {
@@ -25,7 +25,6 @@
   color: #B91C1C;
   border: 1px solid #FCA5A5;
 }
-
 
 /* Status-colored row left border */
 .leave-row-pending  { border-left: 3px solid var(--warning); }
@@ -49,8 +48,8 @@
   border-radius: 8px;
   border-bottom: none;
   margin-bottom: 0;
-  padding: 11px 20px;
-  font-size: 16px;
+  padding: 12px 22px;
+  font-size: 18px;
 }
 .tab-btn:hover {
   background: var(--bg);
@@ -67,22 +66,22 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 17px;
+  font-size: 19px;
 }
-.btn-approve svg, .btn-reject svg { font-size: 18px; }
+.btn-approve svg, .btn-reject svg { font-size: 20px; }
 
 /* Process/view action button */
 .leave-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 17px;
+  font-size: 19px;
 }
-.leave-action-btn svg { font-size: 18px; }
+.leave-action-btn svg { font-size: 20px; }
 
 /* Empty state */
 .leave-empty svg {
-  font-size: 56px;
+  font-size: 60px;
   color: #CBD5E1;
   margin-bottom: 12px;
 }
@@ -96,10 +95,10 @@
   color: #92400E;
   border: 1px solid #FDE68A;
   border-radius: 20px;
-  padding: 4px 14px;
-  font-size: 16px;
+  padding: 5px 16px;
+  font-size: 18px;
   font-weight: 700;
   margin-left: 14px;
   vertical-align: middle;
 }
-.pending-count-badge svg { font-size: 16px; }
+.pending-count-badge svg { font-size: 18px; }

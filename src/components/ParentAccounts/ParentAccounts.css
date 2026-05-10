@@ -22,9 +22,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border-radius: 20px;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
 }
 .auth-status.active {
@@ -35,12 +35,12 @@
   background: #FEF3C7;
   color: #92400E;
 }
-.auth-status svg { font-size: 16px; }
+.auth-status svg { font-size: 18px; }
 
 /* Parent avatar */
 .parent-avatar {
-  width: 52px;
-  height: 52px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
   color: white;
@@ -48,13 +48,13 @@
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 22px;
+  font-size: 24px;
   flex-shrink: 0;
 }
 
 .parent-info { flex: 1; min-width: 0; }
-.parent-name { font-weight: 600; font-size: 18px; }
-.parent-phone { font-size: 15px; color: var(--text-light); font-family: monospace; }
+.parent-name { font-weight: 600; font-size: 20px; }
+.parent-phone { font-size: 17px; color: var(--text-light); font-family: monospace; }
 
 /* Student link chips */
 .student-chips {
@@ -67,8 +67,8 @@
   background: var(--primary-pale);
   color: var(--primary);
   border-radius: 12px;
-  padding: 3px 12px;
-  font-size: 14px;
+  padding: 4px 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -84,7 +84,7 @@
 
 /* Empty state */
 .parents-empty svg {
-  font-size: 56px;
+  font-size: 60px;
   color: #CBD5E1;
   margin-bottom: 12px;
 }

@@ -107,25 +107,22 @@ body {
   gap: 12px;
 }
 .auth-left-logo {
-  width: 56px; height: 56px;
-  background: rgba(255,255,255,.2);
-  border-radius: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28px;
-  font-weight: 900;
   color: white;
   flex-shrink: 0;
 }
+.auth-left-logo svg { font-size: 80px; }
+.auth-left-logo img { width: 80px; height: 80px; object-fit: contain; }
 .auth-left-appname {
-  font-size: 34px;
+  font-size: 40px;
   font-weight: 900;
   color: white;
   letter-spacing: -0.4px;
 }
 .auth-left-tagline {
-  font-size: 15px;
+  font-size: 17px;
   color: rgba(255,255,255,.65);
   text-align: center;
   line-height: 1.6;
@@ -142,14 +139,14 @@ body {
 }
 
 .auth-v2-title {
-  font-size: 42px;
+  font-size: 48px;
   font-weight: 800;
   color: var(--text);
   letter-spacing: -.5px;
   margin-bottom: 8px;
 }
 .auth-v2-sub {
-  font-size: 16px;
+  font-size: 18px;
   color: var(--text-light);
   margin-bottom: 36px;
 }
@@ -178,15 +175,15 @@ body {
   flex-shrink: 0;
   transition: color .2s;
 }
-.auth-v2-icon svg { font-size: 22px; }
+.auth-v2-icon svg { font-size: 26px; }
 .auth-v2-field:focus-within .auth-v2-icon { color: var(--primary); }
 
 .auth-v2-input {
   flex: 1;
   border: none;
   background: transparent;
-  padding: 19px 0;
-  font-size: 17px;
+  padding: 22px 0;
+  font-size: 20px;
   color: var(--text);
   outline: none;
   font-family: inherit;
@@ -205,17 +202,17 @@ body {
   transition: color .2s;
 }
 .auth-v2-eye:hover { color: var(--primary); }
-.auth-v2-eye svg { font-size: 19px; }
+.auth-v2-eye svg { font-size: 24px; }
 
 /* Submit button */
 .auth-v2-btn {
   width: 100%;
-  padding: 20px;
+  padding: 22px;
   background: var(--primary);
   color: white;
   border: none;
   border-radius: 50px;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   cursor: pointer;
   margin-top: 12px;
@@ -233,7 +230,7 @@ body {
 /* Footer links */
 .auth-v2-footer {
   text-align: center;
-  font-size: 16px;
+  font-size: 18px;
   color: var(--text-light);
 }
 .auth-v2-footer a {
@@ -478,17 +475,13 @@ body {
   border-bottom: 1px solid rgba(255,255,255,.1);
 }
 .brand-icon {
-  width: 50px; height: 50px;
-  background: rgba(255,255,255,.18);
-  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
   flex-shrink: 0;
 }
-.brand-name { font-size: 28px; font-weight: 800; letter-spacing: -.3px; }
-.brand-sub  { font-size: 15px; opacity: .7; margin-top: 1px; }
+.brand-name { font-size: 32px; font-weight: 800; letter-spacing: -.3px; }
+.brand-sub  { font-size: 17px; opacity: .7; margin-top: 1px; }
 
 .sidebar-user {
   display: flex;
@@ -500,18 +493,18 @@ body {
   border-radius: 12px;
 }
 .user-avatar {
-  width: 44px; height: 44px;
+  width: 60px; height: 60px;
   background: rgba(255,255,255,.25);
-  border-radius: 11px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 18px;
+  font-size: 26px;
   flex-shrink: 0;
 }
-.user-info .user-name  { font-size: 30px; font-weight: 600; }
-.user-info .user-email { font-size: 20px; opacity: .7; word-break: break-all; }
+.user-info .user-name  { font-size: 22px; font-weight: 700; }
+.user-info .user-email { font-size: 15px; opacity: .7; word-break: break-all; }
 
 .sidebar-nav {
   flex: 1;
@@ -534,13 +527,13 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 13px 16px;
+  padding: 16px 18px;
   border: none;
   border-radius: 10px;
   background: transparent;
   color: rgba(255,255,255,.8);
   cursor: pointer;
-  font-size: 17px;
+  font-size: 22px;
   font-weight: 500;
   text-align: left;
   transition: background .2s, color .2s, transform .15s;
@@ -588,6 +581,8 @@ body {
 .page-container {
   padding: 32px 36px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .page-header {
@@ -874,9 +869,13 @@ body {
 /* Empty state */
 .empty-state {
   text-align: center;
-  padding: 80px 40px;
   background: white;
   border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: calc(100vh - 260px);
 }
 .empty-icon { font-size: 52px; margin-bottom: 14px; }
 .empty-state p { color: var(--text-light); font-size: 16px; }
@@ -1270,11 +1269,11 @@ body {
 
 /* Override: image preview "delete" button shouldn't use submit styles */
 .image-preview-box .btn { width: auto; margin: 0; }
-button[type="submit"] { /* reset global override */ }
+/* button[type="submit"] reset — handled by component-level styles */
 
 /* ── Readability scale-up pass ───────────────────────────────── */
 body {
-  font-size: 16px;
+  font-size: 17px;
 }
 
 .page-container {
@@ -1286,28 +1285,28 @@ body {
 }
 
 .page-title {
-  font-size: 40px;
+  font-size: 42px;
   line-height: 1.15;
 }
 
 .page-subtitle {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .btn {
   padding: 13px 24px;
-  font-size: 16px;
+  font-size: 17px;
   border-radius: 10px;
 }
 
 .btn-sm {
   padding: 10px 18px;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .btn-lg {
   padding: 16px 32px;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .stats-row {
@@ -1316,17 +1315,17 @@ body {
 }
 
 .stat-pill {
-  min-height: 112px;
-  padding: 22px 28px;
+  min-height: 120px;
+  padding: 24px 30px;
   border-radius: 14px;
 }
 
 .stat-pill-label {
-  font-size: 19px;
+  font-size: 21px;
 }
 
 .stat-pill-value {
-  font-size: 46px;
+  font-size: 50px;
 }
 
 .filter-bar {
@@ -1335,17 +1334,17 @@ body {
 }
 
 .search-box {
-  min-height: 58px;
+  min-height: 62px;
   padding: 0 20px;
 }
 
 .search-input,
 .filter-select {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .filter-select {
-  min-height: 58px;
+  min-height: 62px;
   padding: 14px 20px;
 }
 
@@ -1355,39 +1354,39 @@ body {
 
 .data-table th {
   padding: 20px 24px;
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .data-table td {
   padding: 20px 24px;
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .student-name-cell {
-  font-size: 19px;
+  font-size: 20px;
 }
 
 .badge {
   padding: 6px 14px;
-  font-size: 15px;
+  font-size: 16px;
 }
 
 .status-btn {
-  min-height: 38px;
-  padding: 10px 18px;
-  font-size: 16px;
+  min-height: 42px;
+  padding: 10px 20px;
+  font-size: 17px;
 }
 
 .text-muted,
 .text-mono,
 .rfid-tag {
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .avatar,
 .avatar-placeholder {
-  width: 56px;
-  height: 56px;
+  width: 58px;
+  height: 58px;
 }
 
 .detail-panel {
@@ -1395,11 +1394,11 @@ body {
 }
 
 .detail-label {
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .detail-value {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .form-card {
@@ -1407,11 +1406,11 @@ body {
 }
 
 .form-section-title {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .form-group label {
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .form-group input,
@@ -1419,20 +1418,20 @@ body {
 .form-group textarea,
 .textarea {
   padding: 16px 18px;
-  font-size: 18px;
+  font-size: 20px;
 }
 
 .modal-card {
-  max-width: 620px;
-  padding: 34px 38px;
+  max-width: 640px;
+  padding: 36px 40px;
 }
 
 .modal-lg {
-  max-width: 820px;
+  max-width: 860px;
 }
 
 .modal-header h3 {
-  font-size: 26px;
+  font-size: 28px;
 }
 
 .map-stat-card {
@@ -1441,21 +1440,21 @@ body {
 }
 
 .map-stat-num {
-  font-size: 42px;
+  font-size: 44px;
 }
 
 .map-stat-label {
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .map-toggle-btn {
   padding: 13px 22px;
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .bus-gps-banner {
   padding: 16px 22px;
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .map-container {
@@ -1464,192 +1463,5 @@ body {
 }
 
 .map-legend {
-  font-size: 17px;
-}
-
-/* ── GPS demo writer page ───────────────────────────────────── */
-.gps-demo-page {
-  min-height: 100vh;
-  padding: 42px 52px;
-  background: var(--bg);
-}
-
-.gps-demo-page.embedded {
-  min-height: auto;
-  padding: 40px 48px;
-}
-
-.gps-demo-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  background: white;
-  border-radius: 16px;
-  padding: 32px 36px;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 24px;
-}
-
-.gps-demo-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--primary);
-  font-size: 16px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .6px;
-  margin-bottom: 10px;
-}
-
-.gps-demo-header h1 {
-  font-size: 42px;
-  line-height: 1.1;
-  margin: 0 0 10px;
-}
-
-.gps-demo-header p {
-  max-width: 760px;
-  color: var(--text-light);
-  font-size: 18px;
-}
-
-.gps-demo-header code {
-  color: var(--primary);
-  background: var(--primary-pale);
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-
-.gps-demo-actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.gps-demo-alert {
-  margin-bottom: 24px;
-}
-
-.gps-demo-route-panel {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(260px, 1.2fr);
-  gap: 18px;
-  margin-bottom: 24px;
-}
-
-.gps-demo-route-field,
-.gps-demo-route-summary {
-  background: white;
-  border-radius: 14px;
-  padding: 20px 22px;
-  box-shadow: var(--shadow-sm);
-}
-
-.gps-demo-route-field label,
-.gps-demo-route-summary span {
-  display: block;
-  color: var(--text-light);
-  font-size: 15px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  margin-bottom: 8px;
-}
-
-.gps-demo-route-field select {
-  width: 100%;
-  min-height: 54px;
-  border: 2px solid var(--border);
-  border-radius: 10px;
-  padding: 0 16px;
-  color: var(--text);
-  background: #FAFBFC;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.gps-demo-route-field select:focus {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(0,82,204,.1);
-  background: white;
-}
-
-.gps-demo-route-summary {
-  background: linear-gradient(135deg, #EFF6FF, #DBEAFE);
-}
-
-.gps-demo-route-summary strong {
-  display: block;
-  color: #1E40AF;
-  font-size: 22px;
-  line-height: 1.35;
-}
-
-.gps-demo-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(180px, 1fr));
-  gap: 18px;
-  margin-bottom: 24px;
-}
-
-.gps-demo-card {
-  background: white;
-  border-radius: 14px;
-  padding: 24px 26px;
-  box-shadow: var(--shadow-sm);
-}
-
-.gps-demo-card.live {
-  background: linear-gradient(135deg, #FFFBEB, #FEF3C7);
-  color: #92400E;
-}
-
-.gps-demo-card span {
-  display: block;
-  color: var(--text-light);
-  font-size: 15px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  margin-bottom: 8px;
-}
-
-.gps-demo-card strong {
-  display: block;
-  font-size: 28px;
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-.gps-demo-steps {
-  background: white;
-  border-radius: 14px;
-  padding: 28px 32px;
-  box-shadow: var(--shadow-sm);
-}
-
-.gps-demo-steps h2 {
-  font-size: 28px;
-  margin-bottom: 14px;
-}
-
-.gps-demo-steps ol {
-  padding-left: 24px;
-}
-
-.gps-demo-steps li {
-  font-size: 18px;
-  margin: 8px 0;
-}
-
-@media (max-width: 900px) {
-  .gps-demo-page { padding: 22px; }
-  .gps-demo-header { flex-direction: column; padding: 26px; }
-  .gps-demo-actions { justify-content: flex-start; }
-  .gps-demo-route-panel { grid-template-columns: 1fr; }
-  .gps-demo-grid { grid-template-columns: 1fr; }
+  font-size: 19px;
 }

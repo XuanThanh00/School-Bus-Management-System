@@ -3,12 +3,13 @@ import {
   signInWithEmailAndPassword,
   signOut,
   updatePassword,
+  deleteUser,
   getAuth,
 } from 'firebase/auth';
 import { initializeApp, getApps } from 'firebase/app';
 import { auth, db, firebaseConfig } from '../firebase';
 import {
-  doc, setDoc, addDoc, collection, getDocs,
+  doc, getDoc, setDoc, addDoc, collection, getDocs,
   query, where, deleteDoc, updateDoc, onSnapshot,
 } from 'firebase/firestore';
 
@@ -160,7 +161,27 @@ export const resetParentPassword = async (phone, storedPassword, newPassword) =>
   return { authUpdated };
 };
 
-// Delete parent account from Firestore (Firebase Auth deletion requires their session)
+// Delete parent account — removes Firebase Auth account then Firestore doc.
+// Auth deletion signs in via secondary app using the stored defaultPassword.
+// If the parent changed their password, Auth deletion is skipped but Firestore is still removed.
 export const deleteParentRecord = async (parentId) => {
+  const parentSnap = await getDoc(doc(db, 'parents', parentId));
+  if (parentSnap.exists()) {
+    const { phone, defaultPassword } = parentSnap.data();
+    if (phone) {
+      const email = phoneToEmail(phone);
+      const secondaryAuth = getSecondaryAuth();
+      try {
+        const cred = await signInWithEmailAndPassword(
+          secondaryAuth,
+          email,
+          defaultPassword || '123456',
+        );
+        await deleteUser(cred.user);
+      } catch {
+        await signOut(secondaryAuth).catch(() => {});
+      }
+    }
+  }
   await deleteDoc(doc(db, 'parents', parentId));
 };

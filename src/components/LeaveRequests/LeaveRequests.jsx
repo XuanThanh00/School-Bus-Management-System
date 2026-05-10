@@ -115,7 +115,6 @@ const LeaveRequests = () => {
       <div className="page-header">
         <div>
           <h2 className="page-title">
-            <EventBusyIcon style={{ fontSize: 26, verticalAlign: 'middle', marginRight: 8 }} />
             Đơn xin nghỉ học
           </h2>
         </div>

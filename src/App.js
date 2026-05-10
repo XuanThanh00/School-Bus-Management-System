@@ -7,8 +7,6 @@ import './App.css';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Dashboard from './pages/Dashboard';
-import GpsDemoPage from './pages/GpsDemoPage';
-
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { currentUser, loading } = useAuth();
@@ -35,15 +33,7 @@ function AppContent() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/gps-demo"
-        element={
-          <ProtectedRoute>
-            <GpsDemoPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="/" element={currentUser ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
+<Route path="/" element={currentUser ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
     </Routes>
   );
 }

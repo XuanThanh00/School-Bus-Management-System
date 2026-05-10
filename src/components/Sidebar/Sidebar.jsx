@@ -9,7 +9,6 @@ import MapIcon from '@mui/icons-material/Map';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
-import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import LogoutIcon from '@mui/icons-material/Logout';
 import './Sidebar.css';
 
@@ -25,7 +24,6 @@ const NAV_ITEMS = [
   { key: 'busstops',      icon: <DirectionsBusIcon />,    label: 'Quản lý trạm xe' },
   { key: 'leaverequests', icon: <EventNoteIcon />,        label: 'Đơn xin nghỉ học' },
   { key: 'parents',       icon: <FamilyRestroomIcon />,   label: 'Tài khoản phụ huynh' },
-  { key: 'gpsdemo',       icon: <GpsFixedIcon />,         label: 'Demo GPS' },
 ];
 
 /**
@@ -68,7 +66,7 @@ const Sidebar = ({ activeView, setActiveView }) => {
       {/* Brand */}
       <div className="sidebar-brand">
         <div className="brand-icon">
-          <DirectionsBusIcon />
+          <img src="/logo/front-of-bus.png" alt="BusAttend" />
         </div>
         <div>
           <h2 className="brand-name">BusAttend</h2>
