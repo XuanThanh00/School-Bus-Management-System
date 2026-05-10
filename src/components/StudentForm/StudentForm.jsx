@@ -205,7 +205,7 @@ const StudentForm = () => {
         <div className={`rfid-box ${rfidUid && !rfidDuplicate ? 'rfid-box--linked' : ''} ${rfidDuplicate ? 'rfid-box--duplicate' : ''}`}>
           <div className="rfid-box-header">
             <h3 className="rfid-box-title">
-              <ContactlessIcon />
+              <ContactlessIcon style={{ fontSize: 28 }} />
               Gán UID
             </h3>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -221,28 +221,23 @@ const StudentForm = () => {
             <div>
               {/* UID display */}
               <div className="rfid-linked">
-                {checkingRfid ? (
-                  <div className="rfid-pulse" style={{ width: 40, height: 40 }}>
-                    <ContactlessIcon style={{ fontSize: 22, color: 'var(--primary)' }} />
-                  </div>
-                ) : rfidDuplicate ? (
-                  <ReportProblemIcon style={{ fontSize: 24, color: 'var(--danger)', flexShrink: 0 }} />
-                ) : (
-                  <CheckCircleIcon style={{ fontSize: 24, color: 'var(--success)', flexShrink: 0 }} />
-                )}
-                <div>
-                  <div className="rfid-uid-label">UID</div>
-                  <div className="rfid-uid-value">
-                    <CreditCardIcon style={{ fontSize: 16 }} />
-                    {rfidUid}
-                  </div>
-                  {!checkingRfid && !rfidDuplicate && (
-                    <div className="rfid-uid-hint">
-                      <LinkIcon style={{ fontSize: 13 }} />
-                      Thẻ chưa đăng ký — sẵn sàng gán cho học sinh mới
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {checkingRfid && (
+                    <div className="rfid-pulse" style={{ width: 40, height: 40 }}>
+                      <ContactlessIcon style={{ fontSize: 22, color: 'var(--primary)' }} />
                     </div>
                   )}
+                  <div>
+                    <div className="rfid-uid-label">UID</div>
+                    <div className="rfid-uid-value">{rfidUid}</div>
+                  </div>
                 </div>
+                {!checkingRfid && !rfidDuplicate && (
+                  <div className="rfid-uid-hint">
+                    <LinkIcon style={{ fontSize: 16 }} />
+                    Thẻ chưa đăng ký — sẵn sàng gán cho học sinh mới
+                  </div>
+                )}
               </div>
 
               {/* Duplicate warning */}
@@ -254,9 +249,6 @@ const StudentForm = () => {
                     <div className="rfid-dup-detail">
                       Học sinh: <strong>{rfidDuplicate.name}</strong> — Lớp: <strong>{rfidDuplicate.class}</strong>
                       {rfidDuplicate.studentId && <> — Mã HS: <strong>{rfidDuplicate.studentId}</strong></>}
-                    </div>
-                    <div className="rfid-dup-hint">
-                      Bỏ thẻ và quét lại thẻ khác, hoặc xóa gán thẻ cũ trước khi tiếp tục.
                     </div>
                   </div>
                 </div>

@@ -48,7 +48,7 @@
   gap: 6px;
   min-width: 140px;
   justify-content: center;
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 600;
   padding: 6px 12px;
   border-radius: 20px;
@@ -59,7 +59,7 @@
 }
 .status-btn:hover:not(:disabled) { opacity: .85; transform: scale(1.02); }
 .status-btn:disabled { cursor: default; opacity: 1; }
-.status-btn svg { font-size: 15px; }
+.status-btn svg { font-size: 17px; }
 
 .status-btn.status-not-boarded {
   background: #F1F5F9;
@@ -122,14 +122,65 @@
   justify-content: center;
   border-radius: 8px;
 }
-.btn-icon svg, .btn-icon-danger svg { font-size: 22px; }
+.btn-icon svg, .btn-icon-danger svg { font-size: 24px; }
 
 /* Search icon */
 .search-icon { display: flex; align-items: center; color: var(--text-light); }
-.search-icon svg { font-size: 20px; }
+.search-icon svg { font-size: 22px; }
 
 /* Empty state */
 .empty-state svg { font-size: 68px; color: var(--border); margin-bottom: 14px; }
+
+/* ── Expanded detail panel sections ── */
+.detail-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+/* RFID row: current value on left, action on right */
+.detail-rfid-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.detail-rfid-current {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  background: var(--primary-pale);
+  border: 1.5px solid var(--primary-light);
+  border-radius: 8px;
+  padding: 8px 18px;
+}
+.detail-rfid-action {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 22px;
+}
+
+/* Scanning state inside action area */
+.detail-rfid-scanning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #F0F9FF;
+  border: 1.5px dashed #7DD3FC;
+  border-radius: 8px;
+  padding: 10px 16px;
+}
+
+/* Scanned UID big display */
+.detail-rfid-scanned {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text);
+}
 
 .table-row:hover .student-name-cell { color: var(--primary); }
 

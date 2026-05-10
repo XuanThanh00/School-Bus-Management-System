@@ -7,6 +7,7 @@ import MapView from '../components/MapView/MapView';
 import BusStops from '../components/BusStops/BusStops';
 import LeaveRequests from '../components/LeaveRequests/LeaveRequests';
 import ParentAccounts from '../components/ParentAccounts/ParentAccounts';
+import DriverAccounts from '../components/DriverAccounts/DriverAccounts';
 const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const [activeView, setActiveView] = useState(searchParams.get('view') || 'list');
@@ -19,7 +20,8 @@ const Dashboard = () => {
       case 'busstops':      return <BusStops />;
       case 'leaverequests': return <LeaveRequests />;
       case 'parents':       return <ParentAccounts />;
-default:              return <MainTable />;
+      case 'drivers':       return <DriverAccounts />;
+      default:              return <MainTable />;
     }
   };
 

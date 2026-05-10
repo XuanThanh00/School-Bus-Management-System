@@ -9,6 +9,7 @@ import MapIcon from '@mui/icons-material/Map';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
+import DriveEtaIcon from '@mui/icons-material/DriveEta';
 import LogoutIcon from '@mui/icons-material/Logout';
 import './Sidebar.css';
 
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { key: 'busstops',      icon: <DirectionsBusIcon />,    label: 'Quản lý trạm xe' },
   { key: 'leaverequests', icon: <EventNoteIcon />,        label: 'Đơn xin nghỉ học' },
   { key: 'parents',       icon: <FamilyRestroomIcon />,   label: 'Tài khoản phụ huynh' },
+  { key: 'drivers',       icon: <DriveEtaIcon />,         label: 'Tài khoản tài xế' },
 ];
 
 /**

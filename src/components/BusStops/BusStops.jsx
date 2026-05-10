@@ -195,28 +195,23 @@ const BusStops = () => {
       {viewMode === 'map' && (
         <div className="map-fullscreen-overlay">
           <div className="map-fullscreen-header">
-            <MapIcon style={{ fontSize: 19, color: 'var(--primary)' }} />
+            <MapIcon style={{ fontSize: 24, color: 'rgba(255,255,255,.9)' }} />
             <span className="map-fullscreen-title">Bản đồ trạm xe</span>
             <div className="map-header-school">
-              <SchoolIcon style={{ fontSize: 14, color: '#10B981' }} />
+              <SchoolIcon style={{ fontSize: 18 }} />
               <span>{school.name}</span>
-              <span className="map-header-coords">
-                <LocationOnIcon style={{ fontSize: 12 }} />
-                {school.lat.toFixed(4)}, {school.lng.toFixed(4)}
-              </span>
             </div>
             {success && <div className="map-header-alert success">{success}</div>}
             {error   && <div className="map-header-alert error">{error}</div>}
-            <div style={{ flex: 1 }} />
             <span className="map-header-count">
-              <DirectionsBusIcon style={{ fontSize: 15 }} />
+              <img src="/logo/front-of-bus.png" alt="bus" style={{ width: 24, height: 24, objectFit: 'contain' }} />
               {stops.length} trạm
             </span>
             <button
-              className="btn btn-sm btn-outline map-exit-btn"
+              className="map-exit-btn"
               onClick={() => { setViewMode('table'); setPendingPin(null); setError(''); }}
             >
-              <FullscreenExitIcon style={{ fontSize: 16 }} />
+              <FullscreenExitIcon />
               Thu nhỏ
             </button>
           </div>

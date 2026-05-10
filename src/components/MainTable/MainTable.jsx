@@ -431,6 +431,8 @@ const MainTable = () => {
                       <tr className="detail-row">
                         <td colSpan={9}>
                           <div className="detail-panel">
+
+                            {/* ── Phần 1: Thông tin cá nhân ── */}
                             <div className="detail-grid">
                               <div className="detail-item">
                                 <span className="detail-label">Tên phụ huynh</span>
@@ -438,53 +440,78 @@ const MainTable = () => {
                               </div>
                               <div className="detail-item">
                                 <span className="detail-label">SĐT phụ huynh</span>
-                                <span className="detail-value">{student.parentPhone || '—'}</span>
+                                <span className="detail-value" style={{ fontFamily: 'monospace' }}>{student.parentPhone || '—'}</span>
                               </div>
                               <div className="detail-item">
                                 <span className="detail-label">Ngày sinh</span>
                                 <span className="detail-value">{student.dateOfBirth || '—'}</span>
                               </div>
-                              <div className="detail-item" style={{ gridColumn: '1 / -1' }}>
+                              <div className="detail-item">
+                                <span className="detail-label">Trạm đón</span>
+                                <span className="detail-value">{student.busStopName || '—'}</span>
+                              </div>
+                            </div>
+
+                            <div className="detail-divider" />
+
+                            {/* ── Phần 2: RFID ── */}
+                            <div className="detail-rfid-row">
+                              <div>
                                 <span className="detail-label">Mã thẻ RFID</span>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                  <span className="detail-value rfid-full">
+                                <div className="detail-rfid-current">
+                                  <CreditCardIcon style={{ fontSize: 18, color: student.rfidCardId ? 'var(--primary)' : 'var(--text-light)' }} />
+                                  <span style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 700, letterSpacing: 2 }}>
                                     {student.rfidCardId || 'Chưa gắn thẻ'}
                                   </span>
-
-                                  {rfidEditId === student.id ? (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                      {/* Scanning indicator */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                                        <ContactlessIcon style={{ fontSize: 18, color: scannedUid ? 'var(--success)' : 'var(--primary)', animation: scannedUid ? 'none' : 'pulse 1.2s infinite' }} />
-                                        {scannedUid
-                                          ? <><strong>{scannedUid}</strong>{rfidConflict && <span style={{ color: 'var(--danger)' }}> — Thẻ đã dùng cho {rfidConflict.name}!</span>}</>
-                                          : <span style={{ color: 'var(--text-light)' }}>Đặt thẻ lên đầu đọc RFID...</span>
-                                        }
-                                      </div>
-                                      <div style={{ display: 'flex', gap: 6 }}>
-                                        <button
-                                          className="btn btn-sm btn-primary"
-                                          onClick={() => saveRfid(student.id, student.name)}
-                                          disabled={!scannedUid || !!rfidConflict || savingRfid}
-                                        >
-                                          <SaveIcon style={{ fontSize: 14 }} />
-                                          {savingRfid ? 'Đang lưu...' : 'Lưu thẻ'}
-                                        </button>
-                                        <button className="btn btn-sm btn-outline" onClick={cancelRfidEdit}>Hủy</button>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      className="btn btn-sm btn-outline"
-                                      style={{ alignSelf: 'flex-start' }}
-                                      onClick={() => startRfidEdit(student.id)}
-                                    >
-                                      <ContactlessIcon style={{ fontSize: 14 }} />
-                                      {student.rfidCardId ? 'Đổi thẻ RFID' : 'Gán thẻ RFID'}
-                                    </button>
-                                  )}
                                 </div>
                               </div>
+
+                              <div className="detail-rfid-action">
+                                {rfidEditId === student.id ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                    <div className="detail-rfid-scanning">
+                                      <ContactlessIcon style={{ fontSize: 24, color: scannedUid ? 'var(--success)' : 'var(--primary)', animation: scannedUid ? 'none' : 'pulse 1.2s infinite' }} />
+                                      {scannedUid ? (
+                                        <div>
+                                          <span className="detail-rfid-scanned">{scannedUid}</span>
+                                          {rfidConflict && (
+                                            <span style={{ color: 'var(--danger)', fontSize: 15, marginLeft: 8 }}>
+                                              — Thẻ đã dùng cho <strong>{rfidConflict.name}</strong>!
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span style={{ color: 'var(--text-light)', fontSize: 17 }}>Đặt thẻ lên đầu đọc RFID...</span>
+                                      )}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                      <button
+                                        className="btn btn-sm btn-primary"
+                                        onClick={() => saveRfid(student.id, student.name)}
+                                        disabled={!scannedUid || !!rfidConflict || savingRfid}
+                                      >
+                                        <SaveIcon style={{ fontSize: 15 }} />
+                                        {savingRfid ? 'Đang lưu...' : 'Lưu thẻ'}
+                                      </button>
+                                      <button className="btn btn-sm btn-outline" onClick={cancelRfidEdit}>Hủy</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <button
+                                    className="btn btn-sm btn-outline"
+                                    onClick={() => startRfidEdit(student.id)}
+                                  >
+                                    <ContactlessIcon style={{ fontSize: 15 }} />
+                                    {student.rfidCardId ? 'Đổi thẻ RFID' : 'Gán thẻ RFID'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="detail-divider" />
+
+                            {/* ── Phần 3: Điểm danh ── */}
+                            <div className="detail-grid">
                               <div className="detail-item">
                                 <span className="detail-label">Trạng thái điểm danh</span>
                                 <span className={`badge ${dispStatus.cls}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -496,14 +523,6 @@ const MainTable = () => {
                                 <span className="detail-value">
                                   {student.attendanceUpdatedAt?.toDate
                                     ? student.attendanceUpdatedAt.toDate().toLocaleTimeString('vi-VN')
-                                    : '—'}
-                                </span>
-                              </div>
-                              <div className="detail-item">
-                                <span className="detail-label">GPS học sinh</span>
-                                <span className="detail-value">
-                                  {student.location
-                                    ? `${student.location.lat?.toFixed(5)}, ${student.location.lng?.toFixed(5)}`
                                     : '—'}
                                 </span>
                               </div>
@@ -524,6 +543,7 @@ const MainTable = () => {
                                 </div>
                               )}
                             </div>
+
                           </div>
                         </td>
                       </tr>
