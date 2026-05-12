@@ -1,5 +1,5 @@
 # attendance/config.py — all configuration constants
-
+device_id = 'is'
 # ── Paths ──────────────────────────────────────────────────
 STUDENTS_DIR    = "students"
 STUDENT_IMG_DIR = "student_img"
@@ -47,6 +47,9 @@ UART_STM32_BAUD  = 115200
 
 # Set to a GPIO pin number (e.g. 17) when NRST wire is connected
 STM32_RESET_PIN  = None
+
+# ── Audio volume (0–30, default 25) ───────────────────────
+MP3_VOLUME          = 25
 
 # ── Audio tracks played via STM32 → MP3-TF-16P ────────────
 TRACK_INVITE_SCAN   = 1   # "Please scan your card"
