@@ -20,7 +20,7 @@ from .config import (
     HB_PI_INTERVAL, STM32_HB_TIMEOUT,
     FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
     FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL,
-    STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR,
+    STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR, MP3_VOLUME,
     STOP_ARRIVAL_RADIUS_M, STOP_WAIT_TIMEOUT_S, STOP_FINAL_WAIT_S,
 )
 from .vision          import (ImagePreprocessor, YuNetDetector,
@@ -427,6 +427,7 @@ class AttendanceSystem:
         # ACK is sent automatically by STM32Protocol in _dispatch
         # Send HB_PI immediately to transition STM32 to RUNNING
         self.stm32.send_hb_pi()
+        self.stm32.send_set_volume(MP3_VOLUME)
         self._last_hb_pi_sent = time.time()
 
     def _on_hb_stm32(self, flags: int):
