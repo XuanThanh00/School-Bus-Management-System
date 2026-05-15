@@ -36,7 +36,7 @@ The firmware runs **FreeRTOS** with fully static memory allocation (no heap). Al
 
 ```
 Priority 5 ─── Timer Daemon  (FreeRTOS)
-               ├─ iwdg_timer  2 s    feeds IWDG when state = RUNNING or HANDSHAKING
+               ├─ iwdg_timer  8 s    feeds IWDG when state = RUNNING or HANDSHAKING
                ├─ hb_timer    5 s    triggers CommTask to send proactive HB_STM32
                └─ gps_timer  30 s    triggers CommTask to send periodic GPS data
 
