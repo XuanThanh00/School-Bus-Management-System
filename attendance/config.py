@@ -74,7 +74,11 @@ FIREBASE_URL         = "https://student-management-1d269-default-rtdb.asia-south
 SERVICE_ACCOUNT_PATH = "credentials.json"
 
 # Interval for pushing GPS to Firebase (seconds)
-GPS_PUSH_INTERVAL = 10.0
+GPS_PUSH_INTERVAL = 5.0
+
+# GPS source: 0 = STM32 via UART (default), 1 = read from Realtime Database (app tài xế push)
+GPS_SOURCE        = 1
+GPS_FETCH_INTERVAL = 5.0   # seconds between RTDB pulls when GPS_SOURCE = 1
 
 # ── Bus stop arrival & wait ─────────────────────────────
 # WARNING: urban GPS error is ~5-15m — increase if bus misses stops during testing

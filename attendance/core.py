@@ -19,7 +19,7 @@ from .config import (
     TRACK_FACE_START, TRACK_AUTH_OK, TRACK_FACE_MISMATCH,
     HB_PI_INTERVAL, STM32_HB_TIMEOUT,
     FACE_PROMPT_COOLDOWN, RFID_WAIT_TIMEOUT,
-    FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL,
+    FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL, GPS_SOURCE, GPS_FETCH_INTERVAL,
     STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR, MP3_VOLUME,
     STOP_ARRIVAL_RADIUS_M, STOP_WAIT_TIMEOUT_S, STOP_FINAL_WAIT_S,
 )
@@ -299,6 +299,8 @@ class AttendanceSystem:
         self._init_stm32()
         self._start_camera()
         self._init_display()
+        if GPS_SOURCE == 1:
+            self._start_gps_from_rtdb()
 
     def _load_models(self):
         print("Đang load models...")
@@ -390,6 +392,34 @@ class AttendanceSystem:
     def _init_display(self):
         self._display = BusDisplay(route="TUYEN 01", fullscreen=True)
         print("  ✓ Pygame display sẵn sàng")
+
+    def _start_gps_from_rtdb(self):
+        """GPS_SOURCE=1: fetch bus/gps từ Realtime Database mỗi GPS_FETCH_INTERVAL giây."""
+        print(f"  [GPS] Chế độ RTDB — fetch mỗi {GPS_FETCH_INTERVAL}s")
+
+        def _loop():
+            while True:
+                try:
+                    ref = self._cloud.rt_db.reference("bus/gps")
+                    data = ref.get()
+                    if data and isinstance(data, dict):
+                        lat   = float(data.get("lat",   0))
+                        lon   = float(data.get("lng",   0))
+                        speed = float(data.get("speed", 0))
+                        if lat != 0 and lon != 0:
+                            self._gps_lat   = lat
+                            self._gps_lon   = lon
+                            self._gps_speed = speed
+                            self._gps_str   = f"GPS(RTDB): {lat:.5f}, {lon:.5f} | {speed:.0f} km/h"
+                            if self._stop_mgr:
+                                self._stop_mgr.on_gps(lat, lon, speed)
+                except Exception as e:
+                    print(f"  [GPS] RTDB fetch lỗi: {e}")
+                time.sleep(GPS_FETCH_INTERVAL)
+                if not self._running and self._handshake_done:
+                    break
+
+        threading.Thread(target=_loop, name="gps-rtdb", daemon=True).start()
 
     def _init_cloud(self):
         from .cloud_sync import CloudSync
@@ -813,8 +843,15 @@ class AttendanceSystem:
             if k not in seen:
                 self._confirm_tracker[k] = 0
 
-        # Any face in frame → prompt to scan card (cooldown + skip if flow active)
-        if (self._last_results
+        # Any UNCONFIRMED face in frame → prompt to scan card
+        unconfirmed = [
+            r for r in self._last_results
+            if r.get("full_key") and (
+                self.key_info.get(r["full_key"], {}).get("full_name", ""),
+                self.key_info.get(r["full_key"], {}).get("class_name", ""),
+            ) not in self._confirmed_set
+        ]
+        if (unconfirmed
                 and not self._rfid_pending and not self._face_pending
                 and now >= self._face_prompt_cooldown):
             self._face_prompt_cooldown = now + FACE_PROMPT_COOLDOWN
