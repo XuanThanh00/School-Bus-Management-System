@@ -388,7 +388,7 @@ class AttendanceSystem:
         print(f"  ✓ Camera {CAMERA_WIDTH}×{CAMERA_HEIGHT} sẵn sàng")
 
     def _init_display(self):
-        self._display = BusDisplay(route="TUYEN 01", fullscreen=False)
+        self._display = BusDisplay(route="TUYEN 01", fullscreen=True)
         print("  ✓ Pygame display sẵn sàng")
 
     def _init_cloud(self):

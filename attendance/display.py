@@ -64,21 +64,31 @@ class BusDisplay:
     """
 
     def __init__(self, route: str = "TUYEN 01", fullscreen: bool = False):
-        if fullscreen or not os.environ.get("DISPLAY"):
-            os.environ.setdefault("SDL_VIDEODRIVER", "fbcon")
-            os.environ.setdefault("SDL_FBDEV", "/dev/fb0")
-
-        pygame.init()
-        pygame.mouse.set_visible(False)
-
         flags = pygame.FULLSCREEN if fullscreen else 0
-        try:
-            self._screen = pygame.display.set_mode((DISPLAY_W, DISPLAY_H), flags)
-        except Exception:
-            os.environ["SDL_VIDEODRIVER"] = "x11"
-            pygame.quit()
+
+        # Nếu không có DISPLAY (headless), thử kmsdrm rồi fbcon
+        # Nếu có DISPLAY (X11/desktop), dùng luôn, không override driver
+        if not os.environ.get("DISPLAY"):
+            for drv, fbdev in [("kmsdrm", None), ("fbcon", "/dev/fb0")]:
+                try:
+                    os.environ["SDL_VIDEODRIVER"] = drv
+                    if fbdev:
+                        os.environ.setdefault("SDL_FBDEV", fbdev)
+                    pygame.init()
+                    self._screen = pygame.display.set_mode((0, 0), flags)
+                    break
+                except Exception:
+                    pygame.quit()
+            else:
+                raise RuntimeError("Không thể khởi tạo pygame display (headless)")
+        else:
             pygame.init()
-            self._screen = pygame.display.set_mode((DISPLAY_W, DISPLAY_H))
+            self._screen = pygame.display.set_mode((0, 0), flags)
+
+        # Buffer 800×480 để vẽ, rồi scale lên kích thước thực của màn hình
+        self._buf = pygame.Surface((DISPLAY_W, DISPLAY_H))
+
+        pygame.mouse.set_visible(False)
 
         pygame.display.set_caption("Diem Danh Xe Buyt")
         self._clock = pygame.time.Clock()
@@ -179,16 +189,18 @@ class BusDisplay:
     # ── Render ─────────────────────────────────────────────
 
     def _render(self):
-        s = self._screen
+        s = self._buf
         s.fill(BG_MAIN)
         self._draw_header()
         self._draw_camera()
         self._draw_right_panel()
         self._draw_footer()
+        sw, sh = self._screen.get_size()
+        pygame.transform.scale(self._buf, (sw, sh), self._screen)
         pygame.display.flip()
 
     def _draw_header(self):
-        s = self._screen
+        s = self._buf
         pygame.draw.rect(s, BG_HEADER, (0, 0, DISPLAY_W, HEADER_H))
         title = self._font_md.render("HE THONG DIEM DANH XE BUYT", True, COLOR_WHITE)
         s.blit(title, (12, (HEADER_H - title.get_height()) // 2))
@@ -197,7 +209,7 @@ class BusDisplay:
         s.blit(t, (DISPLAY_W - t.get_width() - 12, (HEADER_H - t.get_height()) // 2))
 
     def _draw_camera(self):
-        s   = self._screen
+        s   = self._buf
         top = HEADER_H
 
         pygame.draw.rect(s, (0, 0, 0), (0, top, CAM_W, CAM_H))
@@ -224,7 +236,7 @@ class BusDisplay:
         s.blit(info, (6, top + CAM_H - info.get_height() - 4))
 
     def _draw_right_panel(self):
-        s   = self._screen
+        s   = self._buf
         x   = PANEL_X
         top = HEADER_H
         w   = PANEL_W
@@ -334,7 +346,7 @@ class BusDisplay:
                 yy += row.get_height() + 3
 
     def _draw_footer(self):
-        s = self._screen
+        s = self._buf
         fy = DISPLAY_H - FOOTER_H
         pygame.draw.rect(s, BG_FOOTER, (0, fy, DISPLAY_W, FOOTER_H))
         gps = self._font_sm.render(self._gps_str, True, COLOR_DIM)
@@ -346,8 +358,8 @@ class BusDisplay:
     # ── Helpers ────────────────────────────────────────────
 
     def _draw_card(self, x, y, w, h, bg, border):
-        pygame.draw.rect(self._screen, bg,     (x, y, w, h), border_radius=6)
-        pygame.draw.rect(self._screen, border, (x, y, w, h), width=1, border_radius=6)
+        pygame.draw.rect(self._buf, bg,     (x, y, w, h), border_radius=6)
+        pygame.draw.rect(self._buf, border, (x, y, w, h), width=1, border_radius=6)
 
     def _face_card_style(self):
         s = self._face_status
