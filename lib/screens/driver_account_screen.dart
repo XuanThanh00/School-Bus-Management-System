@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,22 +10,21 @@ import 'role_selection_screen.dart';
 
 // ── Model ─────────────────────────────────────────────
 
-class _AccountData {
-  final String parentName;
-  final String studentName;
-  final String className;
-  final String dateOfBirth;
+class _DriverAccountData {
+  final String docId;
+  final String name;
   final String phone;
+  final String busStopName;
+  final String? imageData;
 
-  const _AccountData({
-    required this.parentName,
-    required this.studentName,
-    required this.className,
-    required this.dateOfBirth,
+  const _DriverAccountData({
+    required this.docId,
+    required this.name,
     required this.phone,
+    required this.busStopName,
+    this.imageData,
   });
 
-  // Format: 0901234567 → 0901 234 567
   String get phoneDisplay {
     if (phone.length == 10) {
       return '${phone.substring(0, 4)} ${phone.substring(4, 7)} ${phone.substring(7)}';
@@ -35,16 +35,15 @@ class _AccountData {
 
 // ── Screen ────────────────────────────────────────────
 
-class AccountScreen extends StatefulWidget {
-  const AccountScreen({super.key});
+class DriverAccountScreen extends StatefulWidget {
+  const DriverAccountScreen({super.key});
 
   @override
-  State<AccountScreen> createState() => _AccountScreenState();
+  State<DriverAccountScreen> createState() => _DriverAccountScreenState();
 }
 
-class _AccountScreenState extends State<AccountScreen> {
-  _AccountData? _data;
-  String? _parentDocId;
+class _DriverAccountScreenState extends State<DriverAccountScreen> {
+  _DriverAccountData? _data;
   bool _loading = true;
 
   @override
@@ -59,47 +58,24 @@ class _AccountScreenState extends State<AccountScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) throw Exception('Chưa đăng nhập');
 
-      final fs = FirebaseFirestore.instance;
-
-      final parentSnap = await fs
-          .collection('parents')
+      final snap = await FirebaseFirestore.instance
+          .collection('drivers')
           .where('email', isEqualTo: user.email)
           .limit(1)
           .get();
+      if (snap.docs.isEmpty) throw Exception('Không tìm thấy tài xế');
 
-      if (parentSnap.docs.isEmpty) throw Exception('Không tìm thấy phụ huynh');
-
-      final parentDoc  = parentSnap.docs.first;
-      final parentData = parentDoc.data();
-      _parentDocId = parentDoc.id;
-      final studentIds = List<String>.from(parentData['studentIds'] ?? []);
-
-      String studentName = '';
-      String className = '';
-      String dateOfBirth = '';
-
-      if (studentIds.isNotEmpty) {
-        final studentSnap = await fs
-            .collection('students')
-            .where('studentId', isEqualTo: studentIds.first)
-            .limit(1)
-            .get();
-        if (studentSnap.docs.isNotEmpty) {
-          final s = studentSnap.docs.first.data();
-          studentName  = s['name']?.toString() ?? '';
-          className    = s['class']?.toString() ?? '';
-          dateOfBirth  = s['dateOfBirth']?.toString() ?? '';
-        }
-      }
+      final doc  = snap.docs.first;
+      final d    = doc.data();
 
       if (mounted) {
         setState(() {
-          _data = _AccountData(
-            parentName:  parentData['displayName']?.toString() ?? '',
-            phone:       parentData['phone']?.toString() ?? '',
-            studentName: studentName,
-            className:   className,
-            dateOfBirth: dateOfBirth,
+          _data = _DriverAccountData(
+            docId:       doc.id,
+            name:        d['name']?.toString() ?? '',
+            phone:       d['phone']?.toString() ?? '',
+            busStopName: d['busStopName']?.toString() ?? '',
+            imageData:   d['imageData']?.toString(),
           );
           _loading = false;
         });
@@ -120,8 +96,8 @@ class _AccountScreenState extends State<AccountScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _data == null
-          ? _buildError()
-          : _buildContent(context),
+              ? _buildError()
+              : _buildContent(context),
     );
   }
 
@@ -140,11 +116,7 @@ class _AccountScreenState extends State<AccountScreen> {
                   color: AppColors.textMain)),
           const SizedBox(height: 12),
           ElevatedButton(
-            onPressed: () {
-              _loadData();
-            },
-            child: const Text('Thử lại'),
-          ),
+              onPressed: _loadData, child: const Text('Thử lại')),
         ],
       ),
     );
@@ -160,19 +132,21 @@ class _AccountScreenState extends State<AccountScreen> {
             children: [
               Row(
                 children: [
-                  StudentAvatar(name: data.parentName, size: 56),
+                  _Avatar(imageData: data.imageData, name: data.name),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(data.parentName,
+                        Text(data.name,
                             style: GoogleFonts.dmSans(
-                                fontSize: 16, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Text('Phụ huynh của ${data.studentName}',
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 3),
+                        Text('Tài xế xe buýt',
                             style: GoogleFonts.dmSans(
-                                fontSize: 12, color: AppColors.textSub)),
+                                fontSize: 12,
+                                color: AppColors.textSub)),
                       ],
                     ),
                   ),
@@ -180,14 +154,14 @@ class _AccountScreenState extends State<AccountScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.primarySurface,
+                      color: AppColors.accent.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text('Lớp ${data.className}',
+                    child: Text('Tài xế',
                         style: GoogleFonts.dmSans(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.primary)),
+                            color: AppColors.accent)),
                   ),
                 ],
               ),
@@ -196,11 +170,10 @@ class _AccountScreenState extends State<AccountScreen> {
               const SizedBox(height: 16),
               InfoRow(label: 'Số điện thoại', value: data.phoneDisplay),
               const Divider(height: 16, color: AppColors.border),
-              InfoRow(label: 'Học sinh', value: data.studentName),
-              const Divider(height: 16, color: AppColors.border),
-              InfoRow(label: 'Lớp', value: data.className),
-              const Divider(height: 16, color: AppColors.border),
-              InfoRow(label: 'Ngày sinh', value: data.dateOfBirth),
+              InfoRow(
+                label: 'Trạm phụ trách',
+                value: data.busStopName.isEmpty ? '--' : data.busStopName,
+              ),
             ],
           ),
         ),
@@ -209,24 +182,12 @@ class _AccountScreenState extends State<AccountScreen> {
         const SectionTitle('CÀI ĐẶT'),
         AppCard(
           padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              _SettingTile(
-                icon: Icons.notifications_outlined,
-                iconColor: AppColors.primary,
-                title: 'Thông báo',
-                subtitle: 'Bật/tắt thông báo điểm danh',
-                onTap: () {},
-              ),
-              const Divider(height: 1, indent: 56, color: AppColors.border),
-              _SettingTile(
-                icon: Icons.lock_outline_rounded,
-                iconColor: AppColors.pending,
-                title: 'Đổi mật khẩu',
-                subtitle: 'Thay đổi mật khẩu đăng nhập',
-                onTap: () => _showChangePassword(context),
-              ),
-            ],
+          child: _SettingTile(
+            icon: Icons.lock_outline_rounded,
+            iconColor: AppColors.pending,
+            title: 'Đổi mật khẩu',
+            subtitle: 'Thay đổi mật khẩu đăng nhập',
+            onTap: () => _showChangePassword(context),
           ),
         ),
         const SizedBox(height: 16),
@@ -236,7 +197,7 @@ class _AccountScreenState extends State<AccountScreen> {
           padding: EdgeInsets.zero,
           child: Column(
             children: [
-              _SettingTile(
+              const _SettingTile(
                 icon: Icons.info_outline_rounded,
                 iconColor: AppColors.textSub,
                 title: 'Phiên bản',
@@ -244,7 +205,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 showArrow: false,
               ),
               const Divider(height: 1, indent: 56, color: AppColors.border),
-              _SettingTile(
+              const _SettingTile(
                 icon: Icons.school_rounded,
                 iconColor: AppColors.textSub,
                 title: 'Trường',
@@ -285,20 +246,18 @@ class _AccountScreenState extends State<AccountScreen> {
     final confirmCtrl = TextEditingController();
     bool obscureOld = true;
     bool obscureNew = true;
-    bool loading = false;
+    bool loading    = false;
     String? error;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) => Padding(
           padding: EdgeInsets.fromLTRB(
-              24, 20, 24,
-              MediaQuery.of(ctx).viewInsets.bottom + 32),
+              24, 20, 24, MediaQuery.of(ctx).viewInsets.bottom + 32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -316,7 +275,6 @@ class _AccountScreenState extends State<AccountScreen> {
                       fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 20),
 
-              // Current password
               Text('Mật khẩu hiện tại',
                   style: GoogleFonts.dmSans(
                       fontSize: 13, fontWeight: FontWeight.w500)),
@@ -329,11 +287,11 @@ class _AccountScreenState extends State<AccountScreen> {
                   hintText: '••••••••',
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscureOld
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 20, color: AppColors.textSub,
-                    ),
+                        obscureOld
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 20,
+                        color: AppColors.textSub),
                     onPressed: () =>
                         setSheetState(() => obscureOld = !obscureOld),
                   ),
@@ -341,7 +299,6 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
               const SizedBox(height: 14),
 
-              // New password
               Text('Mật khẩu mới',
                   style: GoogleFonts.dmSans(
                       fontSize: 13, fontWeight: FontWeight.w500)),
@@ -354,11 +311,11 @@ class _AccountScreenState extends State<AccountScreen> {
                   hintText: '••••••••',
                   suffixIcon: IconButton(
                     icon: Icon(
-                      obscureNew
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      size: 20, color: AppColors.textSub,
-                    ),
+                        obscureNew
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 20,
+                        color: AppColors.textSub),
                     onPressed: () =>
                         setSheetState(() => obscureNew = !obscureNew),
                   ),
@@ -366,7 +323,6 @@ class _AccountScreenState extends State<AccountScreen> {
               ),
               const SizedBox(height: 14),
 
-              // Confirm new password
               Text('Xác nhận mật khẩu mới',
                   style: GoogleFonts.dmSans(
                       fontSize: 13, fontWeight: FontWeight.w500)),
@@ -375,7 +331,8 @@ class _AccountScreenState extends State<AccountScreen> {
                 controller: confirmCtrl,
                 obscureText: true,
                 style: GoogleFonts.dmSans(fontSize: 14),
-                decoration: const InputDecoration(hintText: '••••••••'),
+                decoration:
+                    const InputDecoration(hintText: '••••••••'),
               ),
 
               if (error != null) ...[
@@ -384,9 +341,8 @@ class _AccountScreenState extends State<AccountScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.absentSurface,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                      color: AppColors.absentSurface,
+                      borderRadius: BorderRadius.circular(8)),
                   child: Row(
                     children: [
                       const Icon(Icons.error_outline,
@@ -407,83 +363,90 @@ class _AccountScreenState extends State<AccountScreen> {
                 onPressed: loading
                     ? null
                     : () async {
-                  final oldPass = oldPassCtrl.text.trim();
-                  final newPass = newPassCtrl.text.trim();
-                  final confirm = confirmCtrl.text.trim();
+                        final oldPass = oldPassCtrl.text.trim();
+                        final newPass = newPassCtrl.text.trim();
+                        final confirm = confirmCtrl.text.trim();
 
-                  if (oldPass.isEmpty ||
-                      newPass.isEmpty ||
-                      confirm.isEmpty) {
-                    setSheetState(
-                            () => error = 'Vui lòng điền đầy đủ thông tin');
-                    return;
-                  }
-                  if (newPass.length < 6) {
-                    setSheetState(() =>
-                    error = 'Mật khẩu mới phải ít nhất 6 ký tự');
-                    return;
-                  }
-                  if (newPass != confirm) {
-                    setSheetState(
-                            () => error = 'Mật khẩu xác nhận không khớp');
-                    return;
-                  }
+                        if (oldPass.isEmpty ||
+                            newPass.isEmpty ||
+                            confirm.isEmpty) {
+                          setSheetState(() =>
+                              error = 'Vui lòng điền đầy đủ thông tin');
+                          return;
+                        }
+                        if (newPass.length < 6) {
+                          setSheetState(() =>
+                              error = 'Mật khẩu mới phải ít nhất 6 ký tự');
+                          return;
+                        }
+                        if (newPass != confirm) {
+                          setSheetState(() =>
+                              error = 'Mật khẩu xác nhận không khớp');
+                          return;
+                        }
 
-                  setSheetState(() { loading = true; error = null; });
+                        setSheetState(
+                            () { loading = true; error = null; });
 
-                  try {
-                    final user = FirebaseAuth.instance.currentUser!;
-                    final cred = EmailAuthProvider.credential(
-                      email: user.email!,
-                      password: oldPass,
-                    );
-                    await user.reauthenticateWithCredential(cred);
-                    await user.updatePassword(newPass);
+                        try {
+                          final user =
+                              FirebaseAuth.instance.currentUser!;
+                          final cred =
+                              EmailAuthProvider.credential(
+                            email: user.email!,
+                            password: oldPass,
+                          );
+                          await user
+                              .reauthenticateWithCredential(cred);
+                          await user.updatePassword(newPass);
 
-                    // Sync new password to Firestore
-                    if (_parentDocId != null) {
-                      await FirebaseFirestore.instance
-                          .collection('parents')
-                          .doc(_parentDocId)
-                          .update({'defaultPassword': newPass});
-                    }
+                          // Sync to Firestore
+                          if (_data != null) {
+                            await FirebaseFirestore.instance
+                                .collection('drivers')
+                                .doc(_data!.docId)
+                                .update({'defaultPassword': newPass});
+                          }
 
-                    if (ctx.mounted) {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Đổi mật khẩu thành công!',
-                              style: GoogleFonts.dmSans(
-                                  color: Colors.white)),
-                          backgroundColor: AppColors.present,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                      );
-                    }
-                  } on FirebaseAuthException catch (e) {
-                    setSheetState(() {
-                      loading = false;
-                      error = switch (e.code) {
-                        'wrong-password' => 'Mật khẩu hiện tại không đúng',
-                        'weak-password' => 'Mật khẩu mới quá yếu',
-                        'too-many-requests' => 'Thử lại sau ít phút',
-                        _ => 'Đổi mật khẩu thất bại. Thử lại!',
-                      };
-                    });
-                  } catch (e) {
-                    setSheetState(() {
-                      loading = false;
-                      error = 'Đã có lỗi xảy ra. Thử lại!';
-                    });
-                  }
-                },
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context)
+                                .showSnackBar(SnackBar(
+                              content: Text(
+                                  'Đổi mật khẩu thành công!',
+                                  style: GoogleFonts.dmSans(
+                                      color: Colors.white)),
+                              backgroundColor: AppColors.present,
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius:
+                                      BorderRadius.circular(10)),
+                            ));
+                          }
+                        } on FirebaseAuthException catch (e) {
+                          setSheetState(() {
+                            loading = false;
+                            error = switch (e.code) {
+                              'wrong-password' =>
+                                'Mật khẩu hiện tại không đúng',
+                              'weak-password' => 'Mật khẩu mới quá yếu',
+                              'too-many-requests' =>
+                                'Thử lại sau ít phút',
+                              _ => 'Đổi mật khẩu thất bại. Thử lại!',
+                            };
+                          });
+                        } catch (_) {
+                          setSheetState(() {
+                            loading = false;
+                            error = 'Đã có lỗi xảy ra. Thử lại!';
+                          });
+                        }
+                      },
                 child: loading
                     ? const SizedBox(
-                    height: 20, width: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
+                        height: 20, width: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
                     : const Text('Xác nhận đổi mật khẩu'),
               ),
             ],
@@ -499,8 +462,7 @@ class _AccountScreenState extends State<AccountScreen> {
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
         child: Column(
@@ -516,8 +478,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 style: GoogleFonts.dmSans(
                     fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text(
-                'Bạn sẽ cần đăng nhập lại để xem thông tin điểm danh.',
+            Text('Bạn sẽ cần đăng nhập lại để tiếp tục.',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.dmSans(
                     fontSize: 13, color: AppColors.textSub)),
@@ -531,18 +492,19 @@ class _AccountScreenState extends State<AccountScreen> {
                 if (context.mounted) {
                   Navigator.of(context).pushAndRemoveUntil(
                     PageRouteBuilder(
-                      pageBuilder: (_, a, __) => const RoleSelectionScreen(),
+                      pageBuilder: (_, a, __) =>
+                          const RoleSelectionScreen(),
                       transitionsBuilder: (_, a, __, child) =>
                           FadeTransition(opacity: a, child: child),
                       transitionDuration:
-                      const Duration(milliseconds: 400),
+                          const Duration(milliseconds: 400),
                     ),
-                        (_) => false,
+                    (_) => false,
                   );
                 }
               },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.absent),
+              style:
+                  ElevatedButton.styleFrom(backgroundColor: AppColors.absent),
               child: const Text('Đăng xuất'),
             ),
             const SizedBox(height: 10),
@@ -550,7 +512,7 @@ class _AccountScreenState extends State<AccountScreen> {
               onPressed: () => Navigator.pop(context),
               child: Text('Huỷ',
                   style:
-                  GoogleFonts.dmSans(color: AppColors.textSub)),
+                      GoogleFonts.dmSans(color: AppColors.textSub)),
             ),
           ],
         ),
@@ -559,7 +521,31 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 }
 
-// ── Setting Tile ──────────────────────────────────────
+// ── Widgets ───────────────────────────────────────────
+
+class _Avatar extends StatelessWidget {
+  final String? imageData;
+  final String name;
+
+  const _Avatar({this.imageData, required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    if (imageData != null && imageData!.isNotEmpty) {
+      try {
+        final raw   = imageData!;
+        final bytes = base64Decode(
+            raw.contains(',') ? raw.split(',').last : raw);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: Image.memory(bytes,
+              width: 56, height: 56, fit: BoxFit.cover),
+        );
+      } catch (_) {}
+    }
+    return StudentAvatar(name: name, size: 56);
+  }
+}
 
 class _SettingTile extends StatelessWidget {
   final IconData icon;
@@ -584,7 +570,8 @@ class _SettingTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
             Container(

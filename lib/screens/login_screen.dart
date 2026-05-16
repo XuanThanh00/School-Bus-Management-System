@@ -5,28 +5,35 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import 'main_shell.dart';
+import 'driver_shell.dart';
+import 'role_selection_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String role; // 'parent' or 'driver'
+  const LoginScreen({super.key, this.role = 'parent'});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _phoneCtrl = TextEditingController();
   final _passCtrl  = TextEditingController();
-  bool _obscure     = true;
-  bool _loading     = false;
-  bool _rememberMe  = false;
+  bool _obscure    = true;
+  bool _loading    = false;
+  bool _rememberMe = false;
   String? _errorMsg;
   late AnimationController _anim;
   late Animation<double> _fadeIn;
 
+  bool get _isDriver => widget.role == 'driver';
+
   @override
   void initState() {
     super.initState();
-    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    _anim = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800));
     _fadeIn = CurvedAnimation(parent: _anim, curve: Curves.easeOut);
     _anim.forward();
   }
@@ -41,7 +48,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   String _toEmail(String phone) {
     final cleaned = phone.replaceAll(RegExp(r'\s+'), '');
-    return '$cleaned@busattend.app';
+    return _isDriver ? 'driver_$cleaned@busattend.app' : '$cleaned@busattend.app';
   }
 
   void _login() async {
@@ -62,13 +69,15 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('remember_me', _rememberMe);
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
+      Navigator.of(context).pushAndRemoveUntil(
         PageRouteBuilder(
-          pageBuilder: (_, a, __) => const MainShell(),
+          pageBuilder: (_, a, __) =>
+              _isDriver ? const DriverShell() : const MainShell(),
           transitionsBuilder: (_, a, __, child) =>
               FadeTransition(opacity: a, child: child),
           transitionDuration: const Duration(milliseconds: 400),
         ),
+        (_) => false,
       );
     } on FirebaseAuthException catch (e) {
       setState(() {
@@ -93,6 +102,19 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       body: SafeArea(
         child: Column(
           children: [
+            // Back button — nằm ngoài Stack, căn trái tuyệt đối
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 20),
+                onPressed: () => Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                      builder: (_) => const RoleSelectionScreen()),
+                  (_) => false,
+                ),
+              ),
+            ),
             Expanded(
               flex: 2,
               child: FadeTransition(
@@ -103,21 +125,29 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     Container(
                       width: 72, height: 72,
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: const Center(child: Text('🚌', style: TextStyle(fontSize: 36))),
+                      child: Center(
+                        child: Text(
+                          _isDriver ? '🚌' : '🚌',
+                          style: const TextStyle(fontSize: 36),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Text('BusAttend',
                         style: GoogleFonts.dmSans(
-                          fontSize: 28, fontWeight: FontWeight.w700,
-                          color: Colors.white, letterSpacing: -0.5,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
                         )),
                     const SizedBox(height: 6),
                     Text('Hệ thống điểm danh xe buýt trường học',
                         style: GoogleFonts.dmSans(
-                          fontSize: 13, color: Colors.white.withOpacity(0.75),
+                          fontSize: 13,
+                          color: Colors.white.withValues(alpha: 0.75),
                         )),
                   ],
                 ),
@@ -129,7 +159,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
               child: Container(
                 decoration: const BoxDecoration(
                   color: AppColors.bg,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(28)),
                 ),
                 padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
                 child: SingleChildScrollView(
@@ -139,29 +170,46 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Đăng nhập',
-                            style: GoogleFonts.dmSans(fontSize: 22, fontWeight: FontWeight.w700, color: AppColors.textMain)),
+                            style: GoogleFonts.dmSans(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textMain)),
                         const SizedBox(height: 4),
-                        Text('Dành cho phụ huynh học sinh',
-                            style: GoogleFonts.dmSans(fontSize: 13, color: AppColors.textSub)),
+                        Text(
+                          _isDriver
+                              ? 'Dành cho tài xế xe buýt'
+                              : 'Dành cho phụ huynh học sinh',
+                          style: GoogleFonts.dmSans(
+                              fontSize: 13, color: AppColors.textSub),
+                        ),
                         const SizedBox(height: 28),
 
                         Text('Số điện thoại',
-                            style: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textMain)),
+                            style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.textMain)),
                         const SizedBox(height: 6),
                         TextFormField(
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
                           style: GoogleFonts.dmSans(fontSize: 14),
                           decoration: const InputDecoration(
                             hintText: '0901234567',
-                            prefixIcon: Icon(Icons.phone_outlined, size: 20, color: AppColors.textSub),
+                            prefixIcon: Icon(Icons.phone_outlined,
+                                size: 20, color: AppColors.textSub),
                           ),
                         ),
                         const SizedBox(height: 16),
 
                         Text('Mật khẩu',
-                            style: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textMain)),
+                            style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.textMain)),
                         const SizedBox(height: 6),
                         TextFormField(
                           controller: _passCtrl,
@@ -169,32 +217,41 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           style: GoogleFonts.dmSans(fontSize: 14),
                           decoration: InputDecoration(
                             hintText: '••••••••',
-                            prefixIcon: const Icon(Icons.lock_outline, size: 20, color: AppColors.textSub),
+                            prefixIcon: const Icon(Icons.lock_outline,
+                                size: 20, color: AppColors.textSub),
                             suffixIcon: IconButton(
                               icon: Icon(
-                                _obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                                size: 20, color: AppColors.textSub,
+                                _obscure
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 20,
+                                color: AppColors.textSub,
                               ),
-                              onPressed: () => setState(() => _obscure = !_obscure),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
                             ),
                           ),
                         ),
 
                         const SizedBox(height: 4),
                         InkWell(
-                          onTap: () => setState(() => _rememberMe = !_rememberMe),
+                          onTap: () =>
+                              setState(() => _rememberMe = !_rememberMe),
                           borderRadius: BorderRadius.circular(8),
                           child: Row(
                             children: [
                               Checkbox(
                                 value: _rememberMe,
-                                onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                onChanged: (v) => setState(
+                                    () => _rememberMe = v ?? false),
+                                materialTapTargetSize:
+                                    MaterialTapTargetSize.shrinkWrap,
                                 visualDensity: VisualDensity.compact,
                               ),
                               Text('Ghi nhớ đăng nhập',
                                   style: GoogleFonts.dmSans(
-                                      fontSize: 13, color: AppColors.textMain)),
+                                      fontSize: 13,
+                                      color: AppColors.textMain)),
                             ],
                           ),
                         ),
@@ -202,18 +259,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         if (_errorMsg != null) ...[
                           const SizedBox(height: 10),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
                             decoration: BoxDecoration(
                               color: AppColors.absentSurface,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.error_outline, size: 16, color: AppColors.absent),
+                                const Icon(Icons.error_outline,
+                                    size: 16, color: AppColors.absent),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(_errorMsg!,
-                                      style: GoogleFonts.dmSans(fontSize: 12, color: AppColors.absent)),
+                                      style: GoogleFonts.dmSans(
+                                          fontSize: 12,
+                                          color: AppColors.absent)),
                                 ),
                               ],
                             ),
@@ -224,15 +285,22 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                         ElevatedButton(
                           onPressed: _loading ? null : _login,
                           child: _loading
-                              ? const SizedBox(height: 20, width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white))
                               : const Text('Đăng nhập'),
                         ),
                         const SizedBox(height: 20),
 
                         Center(
-                          child: Text('Phiên bản 1.0.0  ·  Trường THCS ABC',
-                              style: GoogleFonts.dmSans(fontSize: 11, color: AppColors.textHint)),
+                          child: Text(
+                              'Phiên bản 1.0.0  ·  Trường THCS ABC',
+                              style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  color: AppColors.textHint)),
                         ),
                       ],
                     ),
