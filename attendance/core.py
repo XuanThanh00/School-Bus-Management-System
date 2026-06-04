@@ -271,6 +271,7 @@ class AttendanceSystem:
         self._rfid_pending:    dict = {}    # (name, cls) → timestamp
         self._face_announced:  set  = set()
         self._face_prompt_cooldown = 0.0   # seconds until next invite prompt
+        self._audio_busy_until     = 0.0   # block INVITE_SCAN while important track plays
 
         # ── Master key state ────────────────────────────────
         self._master_mode  = False
@@ -638,7 +639,7 @@ class AttendanceSystem:
         rec = self.uid_map.get(uid_hex)
         if rec is None:
             print(f"  [RFID] Unregistered UID: {uid_hex}")
-            self.stm32.send_play_audio(TRACK_SCAN_INVALID)
+            self._play_important(TRACK_SCAN_INVALID)
             return
 
         full_name  = rec["full_name"]
@@ -651,7 +652,7 @@ class AttendanceSystem:
         self._disp_rfid_uid      = uid_hex
         self._disp_rfid_ts       = now
 
-        self.stm32.send_play_audio(TRACK_SCAN_OK)
+        self._play_important(TRACK_SCAN_OK)
 
         # If student already boarded today → this scan means alighting (RFID only, no face needed)
         # If not boarded yet → boarding flow (wait for face match)
@@ -688,7 +689,7 @@ class AttendanceSystem:
 
         for key in rfid_expired:
             if key not in self._confirmed_set:
-                self.stm32.send_play_audio(TRACK_FACE_MISMATCH)
+                self._play_important(TRACK_FACE_MISMATCH)
 
         for key in list(self._face_pending):
             if key in self._rfid_pending and key not in self._confirmed_set:
@@ -739,10 +740,15 @@ class AttendanceSystem:
                 self._record_alighted(uid, info["full_name"], info["class_name"])
             elif alight_result == -1:
                 print(f"  [MASTER] {info['full_name']} — boarded too recently to alight")
-                self.stm32.send_play_audio(TRACK_FACE_MISMATCH)
+                self._play_important(TRACK_FACE_MISMATCH)
             else:
                 self._record_attendance(face_key, frame_bgr, is_master=True)
             break
+
+    def _play_important(self, track: int):
+        """Play high-priority audio and block INVITE_SCAN for FACE_PROMPT_COOLDOWN seconds."""
+        self.stm32.send_play_audio(track)
+        self._audio_busy_until = time.time() + FACE_PROMPT_COOLDOWN
 
     @staticmethod
     def _current_session() -> str:
@@ -769,7 +775,7 @@ class AttendanceSystem:
         print(f"  ✓ ĐIỂM DANH{tag} [{session}]: {full_name} | lớp {class_name} | {ts}")
         print(f"    → {img_path}")
 
-        self.stm32.send_play_audio(TRACK_AUTH_OK)
+        self._play_important(TRACK_AUTH_OK)
 
         if self._cloud:
             student_id = self.att_db.get_student_firebase_id(uid)
@@ -801,7 +807,7 @@ class AttendanceSystem:
         ts = time.strftime("%H:%M:%S")
         session = self._current_session()
         print(f"  ✓ XUỐNG XE [{session}]: {full_name} | lớp {class_name} | {ts}")
-        self.stm32.send_play_audio(TRACK_AUTH_OK)
+        self._play_important(TRACK_AUTH_OK)
 
         if self._cloud:
             student_id = self.att_db.get_student_firebase_id(uid_hex)
@@ -854,7 +860,8 @@ class AttendanceSystem:
         ]
         if (unconfirmed
                 and not self._rfid_pending and not self._face_pending
-                and now >= self._face_prompt_cooldown):
+                and now >= self._face_prompt_cooldown
+                and now >= self._audio_busy_until):
             self._face_prompt_cooldown = now + FACE_PROMPT_COOLDOWN
             self.stm32.send_play_audio(TRACK_INVITE_SCAN)
 
@@ -888,7 +895,7 @@ class AttendanceSystem:
             self._face_pending[face_key] = now
             if face_key not in self._face_announced:
                 self._face_announced.add(face_key)
-                self.stm32.send_play_audio(TRACK_FACE_START)
+                self._play_important(TRACK_FACE_START)
             self._display_status  = "WAIT_RFID"
             self._display_student = {
                 "name": full_name, "class": class_name,
