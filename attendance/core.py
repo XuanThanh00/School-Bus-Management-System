@@ -13,7 +13,7 @@ from .config import (
     CAMERA_WIDTH, CAMERA_HEIGHT, PROCESS_EVERY_N,
     CONFIRM_FRAMES, MATCH_WINDOW, THRESHOLD,
     MASTER_KEY_UID, MASTER_KEY_TIMEOUT,
-    YUNET_PATH,
+    YUNET_PATH, INVITE_MIN_FACE_PX,
     UART_STM32_PORT, UART_STM32_BAUD, STM32_RESET_PIN,
     TRACK_INVITE_SCAN, TRACK_SCAN_OK, TRACK_SCAN_INVALID,
     TRACK_FACE_START, TRACK_AUTH_OK, TRACK_FACE_MISMATCH,
@@ -853,10 +853,12 @@ class AttendanceSystem:
         # Any UNCONFIRMED face in frame → prompt to scan card
         unconfirmed = [
             r for r in self._last_results
-            if r.get("full_key") and (
+            if r.get("full_key")
+            and (
                 self.key_info.get(r["full_key"], {}).get("full_name", ""),
                 self.key_info.get(r["full_key"], {}).get("class_name", ""),
             ) not in self._confirmed_set
+            and r.get("bbox", [0, 0, 0, 0])[2] >= INVITE_MIN_FACE_PX
         ]
         if (unconfirmed
                 and not self._rfid_pending and not self._face_pending

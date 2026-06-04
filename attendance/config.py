@@ -41,6 +41,11 @@ NMS_THRESH   = 0.3
 # ── Face crop ──────────────────────────────────────────────
 FACE_MARGIN  = 0.2
 
+# ── Khoảng cách tối thiểu để nhắc quẹt thẻ ────────────────
+# Ở 1m với camera 640px / FOV 54°: mặt ~15cm ≈ 90px
+# Tăng lên nếu muốn gần hơn, giảm xuống nếu muốn xa hơn
+INVITE_MIN_FACE_PX = 90
+
 # ── STM32 UART (two-tier architecture) ─────────────────────
 UART_STM32_PORT  = "/dev/ttyAMA2"
 UART_STM32_BAUD  = 115200
@@ -49,7 +54,7 @@ UART_STM32_BAUD  = 115200
 STM32_RESET_PIN  = None
 
 # ── Audio volume (0–30, default 25) ───────────────────────
-MP3_VOLUME          = 25
+MP3_VOLUME          = 5
 
 # ── Audio tracks played via STM32 → MP3-TF-16P ────────────
 TRACK_INVITE_SCAN   = 1   # "Please scan your card"
