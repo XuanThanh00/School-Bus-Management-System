@@ -104,6 +104,16 @@ class CloudSync:
             reason = "metadata changed" if firebase_set != sqlite_set else "images missing"
             print(f"  [CLOUD] {reason} → downloading images...")
 
+            # Xóa ảnh cũ khi danh sách học sinh thay đổi (tránh còn ảnh của học sinh đã xóa)
+            if firebase_set != sqlite_set:
+                deleted = 0
+                for old_f in os.listdir(reference_dir):
+                    if old_f.endswith(".jpg"):
+                        os.remove(os.path.join(reference_dir, old_f))
+                        deleted += 1
+                if deleted:
+                    print(f"  [CLOUD] Đã xóa {deleted} ảnh cũ trước khi tải lại")
+
             full_docs = self.fs_db.collection("students").stream()
             count = 0
             for doc in full_docs:
@@ -207,7 +217,8 @@ class CloudSync:
 
     def push_attendance(self, doc_id: str, student_id: str, student_name: str,
                         date_str: str, ts: str, is_boarded: bool,
-                        gps_lat: float, gps_lon: float, img_path: str = None):
+                        gps_lat: float, gps_lon: float, img_path: str = None,
+                        is_master: bool = False):
         """
         Write to Firestore attendanceRecords collection.
         is_boarded=True  → boarding: create document, set status='boarded'.
@@ -239,6 +250,7 @@ class CloudSync:
                     "boardedLng":  gps_lon,
                     "isOnLeave":   False,
                     "imageData":   b64_str,
+                    "isMasterKey": is_master,
                 }, merge=True)
                 print(f"  [CLOUD] ☁ Boarded → attendanceRecords/{doc_id}")
                 self._update_student_status(student_id, "boarded")

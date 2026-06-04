@@ -759,6 +759,7 @@ class AttendanceSystem:
             full_name, class_name, uid, frame_bgr,
             gps_lat=self._gps_lat,
             gps_lon=self._gps_lon,
+            is_master=is_master,
         )
 
         tag = " [MASTER KEY]" if is_master else ""
@@ -779,7 +780,7 @@ class AttendanceSystem:
             threading.Thread(
                 target=self._cloud.push_attendance,
                 args=(doc_id, student_id or id_key, full_name, date_str, ts,
-                      True, self._gps_lat, self._gps_lon, img_path),
+                      True, self._gps_lat, self._gps_lon, img_path, is_master),
                 daemon=True,
             ).start()
 

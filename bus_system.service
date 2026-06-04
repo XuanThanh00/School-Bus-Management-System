@@ -1,0 +1,22 @@
+[Unit]
+Description=Bus Attendance System — main service
+After=network.target graphical.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi5
+WorkingDirectory=/home/pi5/Bus_system
+ExecStart=/home/pi5/Bus_system/bus-venv/bin/python3 /home/pi5/Bus_system/main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Cho phép truy cập display (KMS/DRM và X11)
+SupplementaryGroups=video render input
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

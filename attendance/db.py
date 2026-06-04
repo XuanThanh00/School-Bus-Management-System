@@ -128,6 +128,10 @@ class AttendanceDB:
             self._conn.execute(
                 "ALTER TABLE attendance_records ADD COLUMN alighted_lon REAL"
             )
+        if "is_master" not in existing:
+            self._conn.execute(
+                "ALTER TABLE attendance_records ADD COLUMN is_master INTEGER DEFAULT 0"
+            )
 
     # ══════════════════════════════════════════════════════
     # SESSION
@@ -266,7 +270,8 @@ class AttendanceDB:
     def mark_present(self, full_name: str, class_name: str,
                      uid: str, frame_bgr,
                      gps_lat: float = None,
-                     gps_lon: float = None) -> str:
+                     gps_lon: float = None,
+                     is_master: bool = False) -> str:
         """
         Save evidence image + upsert attendance_record → status=1.
         Returns absolute path to the saved image.
@@ -310,18 +315,19 @@ class AttendanceDB:
         # Upsert → status=1, include GPS if available
         self._conn.execute("""
             INSERT INTO attendance_records
-                (session_id, student_id, status, checked_at, evidence_path, gps_lat, gps_lon)
-            VALUES (?, ?, 1, ?, ?, ?, ?)
+                (session_id, student_id, status, checked_at, evidence_path, gps_lat, gps_lon, is_master)
+            VALUES (?, ?, 1, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, student_id) DO UPDATE SET
                 status        = 1,
                 checked_at    = excluded.checked_at,
                 evidence_path = excluded.evidence_path,
                 gps_lat       = excluded.gps_lat,
                 gps_lon       = excluded.gps_lon,
+                is_master     = excluded.is_master,
                 alighted_at   = NULL,
                 alighted_lat  = NULL,
                 alighted_lon  = NULL
-        """, (session_id, student_id, ts, img_path, gps_lat, gps_lon))
+        """, (session_id, student_id, ts, img_path, gps_lat, gps_lon, int(is_master)))
 
         return img_path
 
