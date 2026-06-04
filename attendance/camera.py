@@ -23,7 +23,7 @@ class CameraThread:
         while self._running:
             f = self._picam2.capture_array()
             with self._lock:
-                self._frame = cv2.cvtColor(f, cv2.COLOR_RGB2BGR)
+                self._frame = f
 
     def get_frame(self):
         with self._lock:
