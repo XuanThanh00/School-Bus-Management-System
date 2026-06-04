@@ -24,7 +24,7 @@ MASTER_KEY_TIMEOUT  = 30
 # ── Camera ─────────────────────────────────────────────────
 CAMERA_WIDTH    = 640
 CAMERA_HEIGHT   = 480
-PROCESS_EVERY_N = 6
+PROCESS_EVERY_N = 3
 
 # ── Model / inference ──────────────────────────────────────
 ONNX_NUM_THREADS = 4

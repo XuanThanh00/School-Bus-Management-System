@@ -5,6 +5,7 @@
 import threading
 
 import cv2
+import numpy as np
 from picamera2 import Picamera2
 
 
@@ -23,7 +24,7 @@ class CameraThread:
         while self._running:
             f = self._picam2.capture_array()
             with self._lock:
-                self._frame = f
+                self._frame = np.ascontiguousarray(f)
 
     def get_frame(self):
         with self._lock:

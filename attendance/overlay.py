@@ -12,11 +12,25 @@ import numpy as np
 from .config import CAMERA_WIDTH, THRESHOLD
 
 
+def _match_result(det_bbox, results, max_dist: int = 80):
+    """Tìm result gần nhất với detection bbox (theo center point)."""
+    dx, dy, dw, dh = det_bbox
+    dc = (dx + dw // 2, dy + dh // 2)
+    best, best_d = None, float('inf')
+    for r in results:
+        rx, ry, rw, rh = r["bbox"]
+        d = ((dc[0] - rx - rw // 2) ** 2 + (dc[1] - ry - rh // 2) ** 2) ** 0.5
+        if d < best_d:
+            best_d, best = d, r
+    return best if best_d < max_dist else None
+
+
 def draw_frame(
     frame_bgr:          np.ndarray,
     last_results:       list,
     key_info:           dict,
     confirmed_set:      set,
+    last_detections:    list    = None,
     master_mode:        bool    = False,
     master_until:       float   = 0.0,
     rfid_display_name:  str     = "",
@@ -43,23 +57,34 @@ def draw_frame(
     out = frame_bgr.copy()
 
     # ── Bounding boxes ─────────────────────────────────────
-    for result in last_results:
-        x, y, w, h = result["bbox"]
-        full_key   = result.get("full_key")
-        score      = result.get("score", 0.0)
-        info       = key_info.get(full_key) if full_key else None
-        name       = info["display"] if info else "?"
+    # Dùng last_detections (fast, realtime) cho vị trí bbox
+    # Match với last_results (chậm hơn) để lấy label/identity
+    draw_list = []
+    if last_detections:
+        for det in last_detections:
+            matched = _match_result(det["bbox"], last_results)
+            draw_list.append((det["bbox"], matched))
+    else:
+        for r in last_results:
+            draw_list.append((r["bbox"], r))
+
+    for bbox, result in draw_list:
+        x, y, w, h = bbox
+        full_key = result.get("full_key") if result else None
+        score    = result.get("score", 0.0) if result else 0.0
+        info     = key_info.get(full_key) if full_key else None
+        name     = info["display"] if info else "?"
 
         face_key = (info["full_name"], info["class_name"]) if info else None
         if face_key and face_key in confirmed_set:
             color = (0, 220, 80)
             label = f"{name} OK"
-        elif score >= THRESHOLD:
+        elif result and score >= THRESHOLD:
             color = (55, 138, 221)
             label = f"{name} {score:.2f}"
         else:
             color = (60, 60, 200)
-            label = f"? {score:.2f}"
+            label = "?"
 
         # Box
         cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)

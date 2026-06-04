@@ -5,12 +5,13 @@ import time
 import threading
 from collections import deque
 
+import cv2
 import pygame
 import numpy as np
 from picamera2 import Picamera2
 
 from .config import (
-    CAMERA_WIDTH, CAMERA_HEIGHT, PROCESS_EVERY_N,
+    CAMERA_WIDTH, CAMERA_HEIGHT,
     CONFIRM_FRAMES, MATCH_WINDOW, THRESHOLD,
     MASTER_KEY_UID, MASTER_KEY_TIMEOUT,
     YUNET_PATH, INVITE_MIN_FACE_PX,
@@ -223,7 +224,9 @@ class AttendanceSystem:
 
     def __init__(self):
         # AI components
-        self.preprocessor = ImagePreprocessor()
+        self.preprocessor     = ImagePreprocessor()
+        self.det_preprocessor = ImagePreprocessor()   # instance riêng cho detection thread
+        self.det_detector:    YuNetDetector = None    # khởi tạo sau khi load model
         self.detector:    YuNetDetector    = None
         self.recognizer:  BuffaloRecognizer = None
         self.face_db:     FaceDatabase      = None
@@ -261,6 +264,10 @@ class AttendanceSystem:
         self._fps_counter     = 0
         self._fps_timer       = time.time()
         self._current_fps     = 0.0
+        self._inf_frame: np.ndarray | None = None   # frame mới nhất cho inference thread
+        self._inf_event = threading.Event()         # báo có frame mới
+        self._det_frame: np.ndarray | None = None   # frame mới nhất cho detection thread
+        self._last_detections: list        = []     # bbox realtime từ detection thread
 
         # ── 2-factor confirm state ──────────────────────────
         self._confirm_tracker: dict = {}
@@ -302,10 +309,14 @@ class AttendanceSystem:
         self._init_display()
         if GPS_SOURCE == 1:
             self._start_gps_from_rtdb()
+        self._running = True
+        threading.Thread(target=self._inference_worker, daemon=True).start()
+        threading.Thread(target=self._detection_worker, daemon=True).start()
 
     def _load_models(self):
         print("Đang load models...")
-        self.detector   = YuNetDetector(YUNET_PATH)
+        self.detector     = YuNetDetector(YUNET_PATH)
+        self.det_detector = YuNetDetector(YUNET_PATH)  # instance riêng cho detection thread
         self.recognizer = BuffaloRecognizer()
 
     def _load_database(self):
@@ -533,8 +544,9 @@ class AttendanceSystem:
                     self._last_gps_push = now
 
                 self._frame_counter += 1
-                if self._frame_counter % PROCESS_EVERY_N == 0:
-                    self._run_inference(frame, now)
+                self._det_frame = frame
+                self._inf_frame = frame
+                self._inf_event.set()
 
                 self._try_master_confirm(frame)
                 self._try_confirm(frame)
@@ -549,6 +561,7 @@ class AttendanceSystem:
                 frame_out = draw_frame(
                     frame,
                     last_results       = self._last_results,
+                    last_detections    = self._last_detections,
                     key_info           = self.key_info,
                     confirmed_set      = self._confirmed_set,
                     master_mode        = self._master_mode,
@@ -620,6 +633,35 @@ class AttendanceSystem:
         self._last_results = results
         self._inference_times.append(time.time() - t0)
 
+    def _inference_worker(self):
+        """Dedicated inference thread — chạy suốt vòng đời app."""
+        while self._running:
+            triggered = self._inf_event.wait(timeout=0.5)
+            if not triggered:
+                continue
+            self._inf_event.clear()
+            frame = self._inf_frame
+            if frame is not None:
+                self._run_inference(frame, time.time())
+
+    def _detection_worker(self):
+        """Fast detection thread — YuNet trên frame 1/2 kích thước (~15ms vs ~40ms full)."""
+        scale = 2
+        while self._running:
+            frame = self._det_frame
+            if frame is None:
+                time.sleep(0.005)
+                continue
+            h, w = frame.shape[:2]
+            small = cv2.resize(frame, (w // scale, h // scale))
+            faces = self.det_detector.detect(small)
+            self._last_detections = [
+                {
+                    "bbox": (f[0]*scale, f[1]*scale, f[2]*scale, f[3]*scale),
+                    "conf": f[4],
+                }
+                for f in faces
+            ]
 
     # ── RFID handler ──────────────────────────────────────
 

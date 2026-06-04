@@ -100,8 +100,10 @@ class BusDisplay:
         self._font_md  = pygame.font.SysFont("dejavusansmono", 14)
         self._font_sm  = pygame.font.SysFont("dejavusansmono", 11)
 
+        # Camera surface — pre-allocated once, reused every frame
+        self._cam_surface = pygame.Surface((CAM_W, CAM_H))
+
         # State
-        self._cam_surface    = None
         self._face_status    = "WAITING"
         self._face_name      = ""
         self._face_class     = ""
@@ -173,11 +175,12 @@ class BusDisplay:
         if last_log is not None:
             self._last_log = last_log
 
-        # Camera → pygame surface
+        # Camera → pygame surface (blit_array vào surface đã pre-allocate, không tạo mới mỗi frame)
         if frame_bgr is not None:
-            rgb  = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-            rgb  = cv2.resize(rgb, (CAM_W, CAM_H))
-            self._cam_surface = pygame.surfarray.make_surface(rgb.swapaxes(0, 1))
+            rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+            rgb = cv2.resize(rgb, (CAM_W, CAM_H))
+            pygame.surfarray.blit_array(self._cam_surface,
+                                        np.ascontiguousarray(rgb.swapaxes(0, 1)))
 
         self._render()
         self._clock.tick(FPS_CAP)
