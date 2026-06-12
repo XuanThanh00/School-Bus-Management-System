@@ -9,18 +9,18 @@ import '../widgets/shared_widgets.dart';
 // ── Models ────────────────────────────────────────────
 
 class _DriverData {
-  final String docId;
-  final String name;
-  final String phone;
-  final String busStopId;
-  final String busStopName;
-  final String? imageData;
+  final String       docId;
+  final String       name;
+  final String       phone;
+  final List<String> busStopIds;
+  final String       busStopName; // display string, e.g. "1. Trạm 1; 2. Trạm 2"
+  final String?      imageData;
 
   const _DriverData({
     required this.docId,
     required this.name,
     required this.phone,
-    required this.busStopId,
+    required this.busStopIds,
     required this.busStopName,
     this.imageData,
   });
@@ -31,11 +31,25 @@ class _DriverData {
       docId:       doc.id,
       name:        d['name']?.toString() ?? '',
       phone:       d['phone']?.toString() ?? '',
-      busStopId:   d['busStopId']?.toString() ?? '',
+      busStopIds:  (d['busStopIds'] as List?)
+                       ?.map((e) => e.toString())
+                       .toList() ?? [],
       busStopName: d['busStopName']?.toString() ?? '',
       imageData:   d['imageData']?.toString(),
     );
   }
+}
+
+class _StopGroup {
+  final String            stopName;
+  final int               order;
+  final List<_StudentItem> students;
+
+  const _StopGroup({
+    required this.stopName,
+    required this.order,
+    required this.students,
+  });
 }
 
 class _StudentItem {
@@ -75,9 +89,9 @@ class DriverHomeScreen extends StatefulWidget {
 }
 
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
-  _DriverData? _driver;
-  List<_StudentItem> _students = [];
-  bool _loading = true;
+  _DriverData?      _driver;
+  List<_StopGroup>  _stopGroups = [];
+  bool   _loading = true;
   String? _error;
 
   @override
@@ -104,24 +118,46 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
       final driver = _DriverData.fromDoc(driverSnap.docs.first);
 
-      // Load students assigned to driver's stop
-      List<_StudentItem> students = [];
-      if (driver.busStopId.isNotEmpty) {
-        final studentSnap = await fs
+      // Load tất cả stop docs song song, sort theo order
+      final stopSnaps = await Future.wait(
+        driver.busStopIds.map((id) => fs.collection('busStops').doc(id).get()),
+      );
+      final stops = stopSnaps
+          .where((s) => s.exists)
+          .map((s) {
+            final d = s.data()! as Map<String, dynamic>;
+            return (
+              id:    s.id,
+              name:  d['name']?.toString() ?? '',
+              order: (d['order'] as num?)?.toInt() ?? 0,
+            );
+          })
+          .toList()
+        ..sort((a, b) => a.order.compareTo(b.order));
+
+      // Load students của từng trạm
+      final groups = <_StopGroup>[];
+      for (final stop in stops) {
+        final snap = await fs
             .collection('students')
-            .where('busStopId', isEqualTo: driver.busStopId)
+            .where('busStopId', isEqualTo: stop.id)
             .get();
-        students = studentSnap.docs
+        final students = snap.docs
             .map((d) => _StudentItem.fromDoc(d))
             .toList()
           ..sort((a, b) => a.name.compareTo(b.name));
+        groups.add(_StopGroup(
+          stopName: stop.name,
+          order:    stop.order,
+          students: students,
+        ));
       }
 
       if (mounted) {
         setState(() {
-          _driver   = driver;
-          _students = students;
-          _loading  = false;
+          _driver     = driver;
+          _stopGroups = groups;
+          _loading    = false;
         });
       }
     } catch (e) {
@@ -129,22 +165,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     }
   }
 
-  int get _absentCount => _students
-      .where((s) => s.attendanceStatus == 'absent')
-      .length;
+  List<_StudentItem> get _allStudents =>
+      _stopGroups.expand((g) => g.students).toList();
 
-  int get _boardedCount => _students
-      .where((s) =>
-          s.attendanceStatus == 'boarded' ||
-          s.attendanceStatus == 'arrived')
-      .length;
-
-  int get _notBoardedCount => _students
-      .where((s) => s.attendanceStatus == 'not_boarded')
-      .length;
-
-  // Tổng học sinh cần đón (trừ học sinh nghỉ)
-  int get _activeCount => _students.length - _absentCount;
+  int get _absentCount    => _allStudents.where((s) => s.attendanceStatus == 'absent').length;
+  int get _boardedCount   => _allStudents.where((s) => s.attendanceStatus == 'boarded' || s.attendanceStatus == 'arrived').length;
+  int get _notBoardedCount => _allStudents.where((s) => s.attendanceStatus == 'not_boarded').length;
+  int get _activeCount    => _allStudents.length - _absentCount;
 
   @override
   Widget build(BuildContext context) {
@@ -272,35 +299,76 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         const SizedBox(height: 20),
 
         const SectionTitle('DANH SÁCH HỌC SINH'),
-        if (_students.isEmpty)
+        if (_stopGroups.isEmpty || _allStudents.isEmpty)
           AppCard(
             child: Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Text('Không có học sinh tại trạm này',
+                child: Text('Không có học sinh tại các trạm này',
                     style: GoogleFonts.dmSans(
                         fontSize: 13, color: AppColors.textSub)),
               ),
             ),
           )
         else
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: Column(
-              children: List.generate(_students.length, (i) {
-                final student = _students[i];
-                final isLast  = i == _students.length - 1;
-                return Column(
-                  children: [
-                    _StudentRow(student: student),
-                    if (!isLast)
-                      const Divider(
-                          height: 1, indent: 70, color: AppColors.border),
-                  ],
-                );
-              }),
-            ),
-          ),
+          ..._stopGroups.map((group) {
+            if (group.students.isEmpty) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Stop header
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 8, top: 4),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 22, height: 22,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Center(
+                          child: Text('${group.order}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(group.stopName,
+                          style: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textMain)),
+                      const SizedBox(width: 6),
+                      Text('(${group.students.length} hs)',
+                          style: GoogleFonts.dmSans(
+                              fontSize: 12, color: AppColors.textSub)),
+                    ],
+                  ),
+                ),
+                AppCard(
+                  padding: EdgeInsets.zero,
+                  child: Column(
+                    children: List.generate(group.students.length, (i) {
+                      final student = group.students[i];
+                      final isLast  = i == group.students.length - 1;
+                      return Column(
+                        children: [
+                          _StudentRow(student: student),
+                          if (!isLast)
+                            const Divider(
+                                height: 1, indent: 70, color: AppColors.border),
+                        ],
+                      );
+                    }),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            );
+          }),
         const SizedBox(height: 80),
       ],
     );
