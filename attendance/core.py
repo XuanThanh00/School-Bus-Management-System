@@ -610,18 +610,21 @@ class AttendanceSystem:
 
     # ── Inference ─────────────────────────────────────────
 
-    def _run_inference(self, frame_bgr: np.ndarray, now: float):
+    def _run_inference(self, frame_bgr: np.ndarray, now: float,
+                       target_key: str | None = None):
         t0        = time.time()
         processed = self.preprocessor.process_live_frame(frame_bgr)
         faces     = self.detector.detect(processed)
         results   = []
 
-        has_face = bool(faces)
-
         if faces:
             crops = [self.recognizer.extract_face_crop(processed, f) for f in faces]
             embs  = [self.recognizer.get_embedding(c) for c in crops]
-            hits  = self.face_db.identify_batch(embs)
+            if target_key:
+                # So sánh thẳng với học sinh đã quẹt thẻ — O(1)
+                hits = [self.face_db.identify_against(emb, target_key) for emb in embs]
+            else:
+                hits = self.face_db.identify_batch(embs)
             for face, (full_key, score) in zip(faces, hits):
                 results.append({
                     "bbox":     face[:4],
@@ -634,15 +637,23 @@ class AttendanceSystem:
         self._inference_times.append(time.time() - t0)
 
     def _inference_worker(self):
-        """Dedicated inference thread — chạy suốt vòng đời app."""
+        """Dedicated inference thread — chỉ nhận diện khi có RFID đang chờ xác nhận."""
         while self._running:
             triggered = self._inf_event.wait(timeout=0.5)
             if not triggered:
                 continue
             self._inf_event.clear()
+            if not self._rfid_pending:
+                self._last_results = []
+                continue
+            # Lấy full_key của học sinh RFID đầu tiên đang pending
+            target_key = None
+            for (full_name, class_name) in self._rfid_pending:
+                target_key = self._get_full_key(full_name, class_name)
+                break
             frame = self._inf_frame
             if frame is not None:
-                self._run_inference(frame, time.time())
+                self._run_inference(frame, time.time(), target_key=target_key)
 
     def _detection_worker(self):
         """Fast detection thread — YuNet trên frame 1/2 kích thước (~15ms vs ~40ms full)."""
@@ -892,17 +903,13 @@ class AttendanceSystem:
             if k not in seen:
                 self._confirm_tracker[k] = 0
 
-        # Any UNCONFIRMED face in frame → prompt to scan card
-        unconfirmed = [
-            r for r in self._last_results
-            if r.get("full_key")
-            and (
-                self.key_info.get(r["full_key"], {}).get("full_name", ""),
-                self.key_info.get(r["full_key"], {}).get("class_name", ""),
-            ) not in self._confirmed_set
-            and r.get("bbox", [0, 0, 0, 0])[2] >= INVITE_MIN_FACE_PX
-        ]
-        if (unconfirmed
+        # Có khuôn mặt đủ gần trong khung hình → nhắc quẹt thẻ
+        # Dùng _last_detections (detection thread luôn chạy) thay vì _last_results
+        has_face_nearby = any(
+            d.get("bbox", (0, 0, 0, 0))[2] >= INVITE_MIN_FACE_PX
+            for d in self._last_detections
+        )
+        if (has_face_nearby
                 and not self._rfid_pending and not self._face_pending
                 and now >= self._face_prompt_cooldown
                 and now >= self._audio_busy_until):
@@ -939,7 +946,9 @@ class AttendanceSystem:
             self._face_pending[face_key] = now
             if face_key not in self._face_announced:
                 self._face_announced.add(face_key)
-                self._play_important(TRACK_FACE_START)
+                # Không phát khi RFID đã pending — AUTH_OK sẽ phát ngay sau
+                if not self._rfid_pending:
+                    self._play_important(TRACK_FACE_START)
             self._display_status  = "WAIT_RFID"
             self._display_student = {
                 "name": full_name, "class": class_name,
@@ -967,6 +976,13 @@ class AttendanceSystem:
             if rec["full_name"] == full_name and rec["class_name"] == class_name:
                 return uid_hex
         return ""
+
+    def _get_full_key(self, full_name: str, class_name: str) -> str | None:
+        """Reverse lookup key_info: (full_name, class_name) → full_key."""
+        for fk, info in self.key_info.items():
+            if info["full_name"] == full_name and info["class_name"] == class_name:
+                return fk
+        return None
 
     def _get_confirmed_ts(self, face_key: tuple) -> str:
         full_name = face_key[0]

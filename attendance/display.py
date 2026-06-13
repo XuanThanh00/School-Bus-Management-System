@@ -85,6 +85,9 @@ class BusDisplay:
             pygame.init()
             self._screen = pygame.display.set_mode((0, 0), flags)
 
+        # Audio được xử lý bởi STM32 — tắt mixer để tránh ALSA underrun
+        pygame.mixer.quit()
+
         # Buffer 800×480 để vẽ, rồi scale lên kích thước thực của màn hình
         self._buf = pygame.Surface((DISPLAY_W, DISPLAY_H))
 

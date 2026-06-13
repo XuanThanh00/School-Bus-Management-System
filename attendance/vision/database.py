@@ -196,6 +196,14 @@ class FaceDatabase:
         return [(self.keys[i], float(scores[j, i]))
                 for j, i in enumerate(best_idx)]
 
+    def identify_against(self, emb: np.ndarray, target_key: str) -> tuple:
+        """So sánh embedding với đúng 1 học sinh — O(1) thay vì O(N)."""
+        try:
+            idx = self.keys.index(target_key)
+        except ValueError:
+            return (None, 0.0)
+        return (target_key, float(self.embeddings[idx] @ emb))
+
     @staticmethod
     def load(detector, recognizer, preprocessor) -> "FaceDatabase":
         """
