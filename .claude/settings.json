@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(Remove-Item \"c:\\\\Users\\\\PC\\\\Desktop\\\\src\\\\student-management\\\\src\\\\pages\\\\GpsDemoPage.jsx\")",
-      "Bash(npm install *)"
-    ]
-  }
-}
