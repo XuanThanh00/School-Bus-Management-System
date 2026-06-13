@@ -10,22 +10,19 @@ import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import FamilyRestroomIcon from '@mui/icons-material/FamilyRestroom';
 import DriveEtaIcon from '@mui/icons-material/DriveEta';
+import HistoryIcon from '@mui/icons-material/History';
 import LogoutIcon from '@mui/icons-material/Logout';
 import './Sidebar.css';
 
-/**
- * NAV_ITEMS
- * Ordered list of navigation entries. Each entry maps a view key to its
- * MUI icon and Vietnamese display label. Reorder or extend here to update the menu.
- */
 const NAV_ITEMS = [
-  { key: 'list',          icon: <PeopleAltIcon />,       label: 'Danh sách học sinh' },
-  { key: 'form',          icon: <PersonAddIcon />,        label: 'Thêm học sinh' },
-  { key: 'map',           icon: <MapIcon />,              label: 'Bản đồ' },
-  { key: 'busstops',      icon: <DirectionsBusIcon />,    label: 'Quản lý trạm xe' },
-  { key: 'leaverequests', icon: <EventNoteIcon />,        label: 'Đơn xin nghỉ học' },
-  { key: 'parents',       icon: <FamilyRestroomIcon />,   label: 'Tài khoản phụ huynh' },
-  { key: 'drivers',       icon: <DriveEtaIcon />,         label: 'Tài khoản tài xế' },
+  { key: 'list',               icon: <PeopleAltIcon />,       label: 'Danh sách học sinh' },
+  { key: 'form',               icon: <PersonAddIcon />,        label: 'Thêm học sinh' },
+  { key: 'map',                icon: <MapIcon />,              label: 'Bản đồ' },
+  { key: 'busstops',           icon: <DirectionsBusIcon />,    label: 'Quản lý trạm xe' },
+  { key: 'leaverequests',      icon: <EventNoteIcon />,        label: 'Đơn xin nghỉ học' },
+  { key: 'attendancehistory',  icon: <HistoryIcon />,          label: 'Lịch sử điểm danh' },
+  { key: 'parents',            icon: <FamilyRestroomIcon />,   label: 'Tài khoản phụ huynh' },
+  { key: 'drivers',            icon: <DriveEtaIcon />,         label: 'Tài khoản tài xế' },
 ];
 
 /**

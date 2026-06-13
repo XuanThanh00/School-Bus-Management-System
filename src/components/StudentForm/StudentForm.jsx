@@ -152,18 +152,18 @@ const StudentForm = () => {
         }),
       };
 
-      await addStudent(studentData, imageFile);
-      if (parentPhone.trim()) {
-        await registerParent({
+      await Promise.all([
+        addStudent(studentData, imageFile),
+        parentPhone.trim() ? registerParent({
           phone: parentPhone.trim(),
           displayName: parentName.trim() || parentPhone.trim(),
           password: '123456',
           studentId: studentId.trim(),
-        });
-      }
+        }) : Promise.resolve(),
+      ]);
 
-      if (rfidUid) await clearPendingRFID();
-      if (currentUser) await addLog(currentUser.uid, `Thêm học sinh: ${name}${rfidUid ? ` (RFID: ${rfidUid})` : ''}`);
+      if (rfidUid) clearPendingRFID();
+      if (currentUser) addLog(currentUser.uid, `Thêm học sinh: ${name}${rfidUid ? ` (RFID: ${rfidUid})` : ''}`);
 
       flashSuccess('Thêm học sinh thành công!');
       resetForm();

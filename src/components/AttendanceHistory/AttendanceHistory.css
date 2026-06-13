@@ -1,0 +1,78 @@
+/* AttendanceHistory.css */
+
+/* Filter bar — wrappable for extra date inputs */
+.att-filter-bar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.att-date-sep {
+  display: flex;
+  align-items: center;
+  color: var(--text-light);
+  font-size: 16px;
+}
+
+/* Shift badge */
+.att-shift-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.att-shift-morning {
+  background: #FEF9C3;
+  color: #854D0E;
+}
+.att-shift-afternoon {
+  background: #EDE9FE;
+  color: #5B21B6;
+}
+
+/* Status badge */
+.att-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.att-present {
+  background: #DCFCE7;
+  color: #166534;
+}
+.att-absent {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+.att-leave {
+  background: #FEF3C7;
+  color: #92400E;
+}
+
+/* Detail expand body */
+.att-detail-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.att-detail-img {
+  width: 110px;
+  height: 110px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+}
+
+.att-record-id {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-light);
+}

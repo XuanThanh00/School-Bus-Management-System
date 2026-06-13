@@ -184,6 +184,35 @@
 
 .table-row:hover .student-name-cell { color: var(--primary); }
 
+/* ── Inline edit form inside detail panel ── */
+.detail-edit-section { padding: 4px 0; }
+.detail-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.detail-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.detail-edit-input {
+  font-size: 14px;
+  padding: 6px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+  transition: border-color .15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.detail-edit-input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.1);
+}
+
 /* Expand chevron */
 .expand-chevron {
   display: inline-flex;

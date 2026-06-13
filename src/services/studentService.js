@@ -188,6 +188,14 @@ export const updateAttendanceStatusByStudentId = async (studentId, status) => {
   return { success: true, finalStatus, forcedByLeave: onLeave };
 };
 
+// Update student info fields (name, class, dateOfBirth, parentName, parentPhone, busStop, etc.)
+export const updateStudent = async (firestoreDocId, data) => {
+  await updateDoc(doc(db, 'students', firestoreDocId), {
+    ...data,
+    updatedAt: new Date(),
+  });
+};
+
 // Find student by RFID UID — used for duplicate check in StudentForm
 export const getStudentByRfidCardId = async (uid) => {
   const q = query(

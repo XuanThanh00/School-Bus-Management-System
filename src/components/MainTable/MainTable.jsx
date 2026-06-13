@@ -4,7 +4,9 @@ import {
   updateAttendanceStatus,
   deleteStudent,
   updateStudentRfid,
+  updateStudent,
 } from '../../services/studentService';
+import { listenToBusStops } from '../../services/busStopService';
 import {
   listenToPendingRFID,
   clearPendingRFID,
@@ -31,18 +33,9 @@ import SchoolIcon from '@mui/icons-material/School';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import EventBusyIcon from '@mui/icons-material/EventBusy';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import EditIcon from '@mui/icons-material/Edit';
 import './MainTable.css';
 
-// Haversine distance in meters
-const haversineDistance = (lat1, lng1, lat2, lng2) => {
-  const R = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
 
 const TODAY = new Date().toISOString().split('T')[0]; // 'YYYY-MM-DD'
 
@@ -84,6 +77,10 @@ const MainTable = () => {
   const [scannedUid, setScannedUid]       = useState(null);
   const [rfidConflict, setRfidConflict]   = useState(null); // student owning this card
   const [savingRfid, setSavingRfid]       = useState(false);
+  const [editingId, setEditingId]         = useState(null);
+  const [editData, setEditData]           = useState({});
+  const [savingEdit, setSavingEdit]       = useState(false);
+  const [busStops, setBusStops]           = useState([]);
   const rfidUnsubRef                      = useRef(null);
   const { currentUser }                   = useAuth();
 
@@ -92,20 +89,11 @@ const MainTable = () => {
   const bufferLeaveIdsRef   = useRef(new Set());
   const schoolRef         = useRef(DEFAULT_SCHOOL);
   const movingTimerRef    = useRef(null);
-  const arrivalDoneRef    = useRef(false);
 
   useEffect(() => { studentsRef.current = students; }, [students]);
   useEffect(() => { schoolRef.current = school; }, [school]);
   useEffect(() => { leaveIdsRef.current = leaveIds; }, [leaveIds]);
   useEffect(() => { bufferLeaveIdsRef.current = bufferLeaveIds; }, [bufferLeaveIds]);
-
-  // Trigger arrival: mark all 'boarded' students as 'arrived'
-  const triggerArrival = useCallback(async () => {
-    const boarded = studentsRef.current.filter((s) => getStatus(s) === 'boarded');
-    if (!boarded.length) return;
-    await Promise.all(boarded.map((s) => updateAttendanceStatus(s.id, 'arrived')));
-    if (currentUser) await addLog(currentUser.uid, `GPS xe tới trường — điểm danh ${boarded.length} học sinh`);
-  }, [currentUser]);
 
   const syncAbsent = (studentList, ids) => {
     const toMark = studentList.filter(
@@ -147,20 +135,14 @@ const MainTable = () => {
       if (!data?.lat || !data?.lng) { setBusGps(null); setIsMoving(false); return; }
       setBusGps(data);
 
-      // Mark as moving; clear after 10s of no update
-      setIsMoving(true);
-      clearTimeout(movingTimerRef.current);
-      movingTimerRef.current = setTimeout(() => setIsMoving(false), 10000);
-
-      // Arrival detection: GPS within 150m of school
-      const sc = schoolRef.current;
-      const dist = haversineDistance(data.lat, data.lng, sc.lat, sc.lng);
-      if (dist < 150 && !arrivalDoneRef.current) {
-        arrivalDoneRef.current = true;
-        triggerArrival();
+      // Only mark as moving when speed > 3 km/h (ignore GPS pings while stationary)
+      const actuallyMoving = (data.speed ?? 0) > 3;
+      setIsMoving(actuallyMoving);
+      if (actuallyMoving) {
+        clearTimeout(movingTimerRef.current);
+        movingTimerRef.current = setTimeout(() => setIsMoving(false), 10000);
       }
-      // Reset trigger when bus moves away from school (> 300m)
-      if (dist > 300) arrivalDoneRef.current = false;
+
     });
 
     return () => {
@@ -171,7 +153,7 @@ const MainTable = () => {
       unsubGps();
       clearTimeout(movingTimerRef.current);
     };
-  }, [triggerArrival]);
+  }, []);
 
   const startRfidEdit = (firestoreDocId) => {
     setRfidEditId(firestoreDocId);
@@ -204,6 +186,13 @@ const MainTable = () => {
     finally { setSavingRfid(false); }
   };
 
+  useEffect(() => {
+    const unsub = listenToBusStops((data) => {
+      setBusStops(data.filter((s) => s.isActive !== false));
+    });
+    return unsub;
+  }, []);
+
   // Cleanup RFID listener on unmount
   useEffect(() => () => rfidUnsubRef.current?.(), []);
 
@@ -234,10 +223,15 @@ const MainTable = () => {
 
   const handleDelete = async (studentId, studentName) => {
     if (!window.confirm(`Xóa học sinh "${studentName}"?`)) return;
+    const removed = studentsRef.current.find((s) => s.id === studentId);
+    setStudents((prev) => prev.filter((s) => s.id !== studentId));
     try {
       await deleteStudent(studentId);
-      if (currentUser) await addLog(currentUser.uid, `Xóa học sinh: ${studentName}`);
-    } catch (err) { console.error(err); }
+      if (currentUser) addLog(currentUser.uid, `Xóa học sinh: ${studentName}`);
+    } catch (err) {
+      console.error(err);
+      if (removed) setStudents((prev) => [removed, ...prev]);
+    }
   };
 
   const handleResetDay = async () => {
@@ -245,9 +239,44 @@ const MainTable = () => {
     try {
       const targets = students.filter((s) => !isStudentOnLeave(s));
       await Promise.all(targets.map((s) => updateAttendanceStatus(s.id, 'not_boarded')));
-      arrivalDoneRef.current = false;
       if (currentUser) await addLog(currentUser.uid, `Reset điểm danh ngày mới`);
     } catch (err) { console.error(err); }
+  };
+
+  const startEdit = (student) => {
+    setEditingId(student.id);
+    setEditData({
+      name:        student.name || '',
+      class:       student.class || '',
+      dateOfBirth: student.dateOfBirth || '',
+      parentName:  student.parentName || '',
+      parentPhone: student.parentPhone || '',
+      busStopId:   student.busStopId || '',
+    });
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditData({}); };
+
+  const saveEdit = async (firestoreDocId, studentName) => {
+    setSavingEdit(true);
+    try {
+      const selectedStop = busStops.find((s) => s.id === editData.busStopId);
+      await updateStudent(firestoreDocId, {
+        name:        editData.name.trim(),
+        class:       editData.class.trim(),
+        dateOfBirth: editData.dateOfBirth.trim(),
+        parentName:  editData.parentName.trim(),
+        parentPhone: editData.parentPhone.trim(),
+        busStopId:   selectedStop?.id   || editData.busStopId || '',
+        busStopName: selectedStop?.name || '',
+      });
+      if (currentUser) addLog(currentUser.uid, `Sửa thông tin học sinh: ${editData.name.trim() || studentName}`);
+      cancelEdit();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const uniqueClasses = [...new Set(students.map((s) => s.class).filter(Boolean))].sort();
@@ -433,24 +462,78 @@ const MainTable = () => {
                           <div className="detail-panel">
 
                             {/* ── Phần 1: Thông tin cá nhân ── */}
-                            <div className="detail-grid">
-                              <div className="detail-item">
-                                <span className="detail-label">Tên phụ huynh</span>
-                                <span className="detail-value">{student.parentName || '—'}</span>
+                            {editingId === student.id ? (
+                              <div className="detail-edit-section">
+                                <div className="detail-edit-grid">
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">Họ tên</label>
+                                    <input className="detail-edit-input" value={editData.name} onChange={(e) => setEditData({ ...editData, name: e.target.value })} />
+                                  </div>
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">Lớp</label>
+                                    <input className="detail-edit-input" value={editData.class} onChange={(e) => setEditData({ ...editData, class: e.target.value })} />
+                                  </div>
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">Ngày sinh</label>
+                                    <input className="detail-edit-input" value={editData.dateOfBirth} onChange={(e) => setEditData({ ...editData, dateOfBirth: e.target.value })} placeholder="DD/MM/YYYY" />
+                                  </div>
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">Tên phụ huynh</label>
+                                    <input className="detail-edit-input" value={editData.parentName} onChange={(e) => setEditData({ ...editData, parentName: e.target.value })} />
+                                  </div>
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">SĐT phụ huynh</label>
+                                    <input className="detail-edit-input" value={editData.parentPhone} onChange={(e) => setEditData({ ...editData, parentPhone: e.target.value })} />
+                                  </div>
+                                  <div className="detail-edit-field">
+                                    <label className="detail-label">Trạm xe</label>
+                                    <select className="detail-edit-input" value={editData.busStopId} onChange={(e) => setEditData({ ...editData, busStopId: e.target.value })}>
+                                      <option value="">-- Chọn trạm --</option>
+                                      {busStops.map((stop) => (
+                                        <option key={stop.id} value={stop.id}>{stop.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                                  <button className="btn btn-sm btn-primary" onClick={() => saveEdit(student.id, student.name)} disabled={savingEdit}>
+                                    <SaveIcon style={{ fontSize: 15 }} />
+                                    {savingEdit ? 'Đang lưu...' : 'Lưu thông tin'}
+                                  </button>
+                                  <button className="btn btn-sm btn-outline" onClick={cancelEdit} disabled={savingEdit}>Hủy</button>
+                                </div>
                               </div>
-                              <div className="detail-item">
-                                <span className="detail-label">SĐT phụ huynh</span>
-                                <span className="detail-value" style={{ fontFamily: 'monospace' }}>{student.parentPhone || '—'}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span className="detail-label">Ngày sinh</span>
-                                <span className="detail-value">{student.dateOfBirth || '—'}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span className="detail-label">Trạm đón</span>
-                                <span className="detail-value">{student.busStopName || '—'}</span>
-                              </div>
-                            </div>
+                            ) : (
+                              <>
+                                <div className="detail-grid">
+                                  <div className="detail-item">
+                                    <span className="detail-label">Tên phụ huynh</span>
+                                    <span className="detail-value">{student.parentName || '—'}</span>
+                                  </div>
+                                  <div className="detail-item">
+                                    <span className="detail-label">SĐT phụ huynh</span>
+                                    <span className="detail-value" style={{ fontFamily: 'monospace' }}>{student.parentPhone || '—'}</span>
+                                  </div>
+                                  <div className="detail-item">
+                                    <span className="detail-label">Ngày sinh</span>
+                                    <span className="detail-value">{student.dateOfBirth || '—'}</span>
+                                  </div>
+                                  <div className="detail-item">
+                                    <span className="detail-label">Trạm đón</span>
+                                    <span className="detail-value">{student.busStopName || '—'}</span>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                                  <button
+                                    className="btn btn-sm btn-outline"
+                                    onClick={(e) => { e.stopPropagation(); startEdit(student); }}
+                                  >
+                                    <EditIcon style={{ fontSize: 14 }} />
+                                    Chỉnh sửa
+                                  </button>
+                                </div>
+                              </>
+                            )}
 
                             <div className="detail-divider" />
 

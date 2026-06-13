@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import polylineDecode from '@mapbox/polyline';
 import { listenToStudents } from '../../services/studentService';
 import { listenToBusStops } from '../../services/busStopService';
 import { listenToSchoolConfig, DEFAULT_SCHOOL } from '../../services/schoolConfigService';
@@ -112,6 +113,7 @@ const MapView = () => {
   const [loading, setLoading]             = useState(true);
   const [showStops, setShowStops]         = useState(true);
   const [showStudents, setShowStudents]   = useState(true);
+  const [osrmRoute, setOsrmRoute]         = useState(null);
 
   useEffect(() => {
     const unsubStops    = listenToBusStops(setBusStops);
@@ -131,11 +133,28 @@ const MapView = () => {
       }
     });
 
+    // OSRM encoded polyline route from RTDB
+    const routeRef = ref(rtdb, 'bus/route');
+    const unsubRoute = onValue(routeRef, (snap) => {
+      const data = snap.val();
+      if (data?.polyline) {
+        try {
+          const decoded = polylineDecode.decode(data.polyline);
+          setOsrmRoute(decoded);
+        } catch {
+          setOsrmRoute(null);
+        }
+      } else {
+        setOsrmRoute(null);
+      }
+    });
+
     return () => {
       unsubStops();
       unsubStudents();
       unsubSchool();
       unsubGps();
+      unsubRoute();
     };
   }, []);
 
@@ -268,11 +287,17 @@ const MapView = () => {
           {/* Bus GPS tracker (pans map when followBus is true) */}
           {busGps && <BusTracker position={busGps} follow={followBus} />}
 
-          {/* Route line */}
-          {showStops && routePositions.length >= 2 && (
+          {/* Route line — OSRM thực nếu có, fallback đường thẳng */}
+          {showStops && osrmRoute?.length >= 2 && (
+            <Polyline
+              positions={osrmRoute}
+              pathOptions={{ color: '#16A34A', weight: 4, opacity: 0.85 }}
+            />
+          )}
+          {showStops && !osrmRoute && routePositions.length >= 2 && (
             <Polyline
               positions={routePositions}
-              pathOptions={{ color: '#0052CC', weight: 3, opacity: 0.75, dashArray: '8 5' }}
+              pathOptions={{ color: '#16A34A', weight: 3, opacity: 0.75, dashArray: '8 5' }}
             />
           )}
 

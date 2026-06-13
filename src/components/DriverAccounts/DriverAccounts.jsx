@@ -24,7 +24,7 @@ import './DriverAccounts.css';
 
 const isValidVNDate = (val) => /^\d{2}\/\d{2}\/\d{4}$/.test(val);
 
-const EMPTY_FORM = { driverId: '', name: '', dateOfBirth: '', phone: '', busStopId: '' };
+const EMPTY_FORM = { driverId: '', name: '', dateOfBirth: '', phone: '', busStopIds: [] };
 
 const DriverAccounts = () => {
   const { currentUser } = useAuth();
@@ -81,7 +81,7 @@ const DriverAccounts = () => {
     if (!form.name.trim())                              { setError('Họ tên là bắt buộc'); return; }
     if (!form.dateOfBirth || !isValidVNDate(form.dateOfBirth)) { setError('Ngày sinh phải theo định dạng DD/MM/YYYY'); return; }
     if (!form.phone.trim())                             { setError('Số điện thoại là bắt buộc'); return; }
-    if (!form.busStopId)                                { setError('Vui lòng chọn trạm xe'); return; }
+    if (!form.busStopIds || form.busStopIds.length === 0) { setError('Vui lòng chọn ít nhất một trạm xe'); return; }
 
     setSaving(true);
     try {
@@ -94,10 +94,13 @@ const DriverAccounts = () => {
         });
       }
 
-      const stop = busStops.find((s) => s.id === form.busStopId);
-      const busStopName = stop
-        ? `${stop.order ? `${stop.order}. ` : ''}${stop.name}${stop.address ? ` — ${stop.address}` : ''}`
-        : '';
+      const busStopName = form.busStopIds
+        .map((id) => {
+          const s = busStops.find((x) => x.id === id);
+          return s ? `${s.order ? `${s.order}. ` : ''}${s.name}${s.address ? ` — ${s.address}` : ''}` : '';
+        })
+        .filter(Boolean)
+        .join('; ');
       await addDriver({ ...form, imageData, busStopName });
       if (currentUser) await addLog(currentUser.uid, `Thêm tài xế: ${form.name}`);
       flash('Đã thêm tài xế thành công');
@@ -240,35 +243,37 @@ const DriverAccounts = () => {
                     Chưa có trạm xe — vào <strong>Quản lý trạm xe</strong> để thêm trước.
                   </p>
                 ) : (
-                  <select
-                    value={form.busStopId}
-                    onChange={(e) => setForm({ ...form, busStopId: e.target.value })}
-                  >
-                    <option value="">-- Không chọn trạm --</option>
+                  <div className="bus-stop-checklist">
                     {busStops.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.order ? `${s.order}. ` : ''}{s.name}{s.address ? ` — ${s.address}` : ''}
-                      </option>
+                      <label key={s.id} className="bus-stop-check-item">
+                        <input
+                          type="checkbox"
+                          checked={form.busStopIds.includes(s.id)}
+                          onChange={(e) => {
+                            const ids = e.target.checked
+                              ? [...form.busStopIds, s.id]
+                              : form.busStopIds.filter((id) => id !== s.id);
+                            setForm({ ...form, busStopIds: ids });
+                          }}
+                        />
+                        <span>{s.order ? `${s.order}. ` : ''}{s.name}{s.address ? ` — ${s.address}` : ''}</span>
+                      </label>
                     ))}
-                  </select>
+                  </div>
                 )}
-                {form.busStopId && (() => {
-                  const s = busStops.find((x) => x.id === form.busStopId);
-                  return s ? (
-                    <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--primary-pale)', borderRadius: 8, fontSize: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--primary)' }}>
-                        <LocationOnIcon style={{ fontSize: 15 }} />
-                        {s.name}
-                      </div>
-                      {s.address && <div style={{ color: 'var(--text-light)', marginTop: 2 }}>{s.address}</div>}
-                      {s.location && (
-                        <div style={{ color: 'var(--text-light)', marginTop: 2, fontFamily: 'monospace', fontSize: 12 }}>
-                          {s.location.lat.toFixed(5)}, {s.location.lng.toFixed(5)}
-                        </div>
-                      )}
-                    </div>
-                  ) : null;
-                })()}
+                {form.busStopIds.length > 0 && (
+                  <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {form.busStopIds.map((id) => {
+                      const s = busStops.find((x) => x.id === id);
+                      return s ? (
+                        <span key={id} className="badge driver-stop-badge">
+                          <LocationOnIcon style={{ fontSize: 12, verticalAlign: 'middle', marginRight: 2 }} />
+                          {s.name}
+                        </span>
+                      ) : null;
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -317,7 +322,9 @@ const DriverAccounts = () => {
                 </thead>
                 <tbody>
                   {drivers.map((d) => {
-                    const stop = busStops.find((s) => s.id === d.busStopId);
+                    const driverStops = (d.busStopIds?.length ? d.busStopIds : d.busStopId ? [d.busStopId] : [])
+                      .map((id) => busStops.find((s) => s.id === id))
+                      .filter(Boolean);
                     return (
                       <tr key={d.id} className="table-row">
                         <td>
@@ -342,8 +349,12 @@ const DriverAccounts = () => {
                         </td>
                         <td className="text-muted-sm">{d.dateOfBirth || '—'}</td>
                         <td>
-                          {stop
-                            ? <span className="badge driver-stop-badge">{stop.name}</span>
+                          {driverStops.length > 0
+                            ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {driverStops.map((s) => (
+                                  <span key={s.id} className="badge driver-stop-badge">{s.name}</span>
+                                ))}
+                              </div>
                             : <span className="text-muted-sm">—</span>}
                         </td>
                         <td>
@@ -432,7 +443,10 @@ const DriverAccounts = () => {
               <div className="detail-item">
                 <span className="detail-label">Trạm Xe</span>
                 <span className="detail-value">
-                  {busStops.find((s) => s.id === selected.busStopId)?.name || '—'}
+                  {(selected.busStopIds?.length ? selected.busStopIds : selected.busStopId ? [selected.busStopId] : [])
+                    .map((id) => busStops.find((s) => s.id === id)?.name)
+                    .filter(Boolean)
+                    .join(', ') || '—'}
                 </span>
               </div>
               <div className="detail-item">

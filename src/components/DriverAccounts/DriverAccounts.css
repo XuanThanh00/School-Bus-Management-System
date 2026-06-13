@@ -82,3 +82,33 @@
   font-size: 19px;
 }
 .upload-placeholder svg { font-size: 40px; color: var(--border); }
+
+/* Bus stop multi-select checklist */
+.bus-stop-checklist {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bus-stop-check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.bus-stop-check-item:hover { background: var(--primary-pale); }
+.bus-stop-check-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+  cursor: pointer;
+}
