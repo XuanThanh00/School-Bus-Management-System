@@ -23,6 +23,7 @@ from .config import (
     FIREBASE_URL, SERVICE_ACCOUNT_PATH, GPS_PUSH_INTERVAL, GPS_SOURCE, GPS_FETCH_INTERVAL,
     STUDENTS_DIR, DB_FILE, MIN_BOARD_SECONDS, MORNING_END_HOUR, MP3_VOLUME,
     STOP_ARRIVAL_RADIUS_M, STOP_WAIT_TIMEOUT_S, STOP_FINAL_WAIT_S,
+    DEBUG_FORCE_STM32_ERROR,
 )
 from .vision          import (ImagePreprocessor, YuNetDetector,
                                BuffaloRecognizer, FaceDatabase, load_key_info)
@@ -304,9 +305,9 @@ class AttendanceSystem:
         self._init_cloud()
         self._load_models()
         self._load_database()
+        self._init_display()    # display trước để show_stm32_error() khả dụng
         self._init_stm32()
         self._start_camera()
-        self._init_display()
         if GPS_SOURCE == 1:
             self._start_gps_from_rtdb()
         self._running = True
@@ -374,16 +375,28 @@ class AttendanceSystem:
         )
         self.stm32.open()
 
-        # Wait up to 30s for handshake
+        # Wait up to 30s for handshake (bỏ qua nếu đang test error screen)
         print("  Chờ STM32 READY...", end="", flush=True)
-        deadline = time.time() + 30
-        while not self._handshake_done and time.time() < deadline:
-            time.sleep(0.1)
+        if not DEBUG_FORCE_STM32_ERROR:
+            deadline = time.time() + 30
+            while not self._handshake_done and time.time() < deadline:
+                time.sleep(0.1)
 
         if self._handshake_done:
             print(" ✓ STM32 sẵn sàng")
-        else:
-            print(" ⚠ Timeout — tiếp tục không có STM32")
+            return
+
+        # Timeout — hiện màn hình lỗi và chờ vô hạn
+        print("\n  ✗ STM32 không phản hồi sau 30s — chờ READY...")
+        while not self._handshake_done:
+            if self._display:
+                still_running = self._display.show_stm32_error()
+                if not still_running:
+                    self._display.quit()
+                    raise SystemExit(0)
+            else:
+                time.sleep(0.5)
+        print("  ✓ STM32 sẵn sàng (sau chờ)")
 
     def _start_camera(self):
         from libcamera import controls
@@ -649,7 +662,10 @@ class AttendanceSystem:
             # Lấy full_key của học sinh RFID đầu tiên đang pending
             target_key = None
             for (full_name, class_name) in self._rfid_pending:
-                target_key = self._get_full_key(full_name, class_name)
+                fk = self._get_full_key(full_name, class_name)
+                # Chỉ dùng targeted nếu key thực sự có trong face DB
+                if fk and fk in self.face_db.keys:
+                    target_key = fk
                 break
             frame = self._inf_frame
             if frame is not None:
@@ -942,7 +958,9 @@ class AttendanceSystem:
             self._confirm_tracker.get(full_key, 0) + 1)
         count = self._confirm_tracker[full_key]
 
-        if count >= CONFIRM_FRAMES:
+        # RFID đã xác định danh tính → chỉ cần 1 frame tốt; ngược lại cần CONFIRM_FRAMES
+        frames_needed = 1 if self._rfid_pending else CONFIRM_FRAMES
+        if count >= frames_needed:
             self._face_pending[face_key] = now
             if face_key not in self._face_announced:
                 self._face_announced.add(face_key)

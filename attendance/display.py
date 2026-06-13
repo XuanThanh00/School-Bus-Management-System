@@ -192,6 +192,69 @@ class BusDisplay:
     def quit(self):
         pygame.quit()
 
+    def show_stm32_error(self) -> bool:
+        """Màn hình lỗi STM32 — gọi liên tục cho đến khi READY hoặc người dùng thoát.
+        Trả về False nếu người dùng nhấn Q/ESC."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            if event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    return False
+
+        s = self._buf
+        s.fill((8, 0, 0))
+
+        cx = DISPLAY_W // 2
+        cy = DISPLAY_H // 2 - 40
+        r  = 105  # bán kính tam giác
+
+        def tri(radius):
+            return [
+                (cx,                       cy - radius),
+                (cx - int(radius * 1.15),  cy + int(radius * 0.62)),
+                (cx + int(radius * 1.15),  cy + int(radius * 0.62)),
+            ]
+
+        # Lớp glow từ ngoài vào trong
+        for rad, col in [
+            (r + 20, (50,   0,   0)),
+            (r + 14, (100,  0,   0)),
+            (r +  8, (170, 10,  10)),
+            (r +  4, (220, 25,  25)),
+            (r,      (255, 55,  55)),
+        ]:
+            pygame.draw.polygon(s, col, tri(rad))
+
+        # Nền tối bên trong tam giác
+        pygame.draw.polygon(s, (25, 0, 0), tri(r - 8))
+
+        # Viền trắng
+        pygame.draw.polygon(s, (255, 255, 255), tri(r), 3)
+
+        # Dấu "!" bên trong
+        exc = self._font_xl.render("!", True, (255, 255, 255))
+        s.blit(exc, exc.get_rect(center=(cx, cy + 14)))
+
+        # Chữ "ERROR" dưới tam giác
+        bottom_y = cy + int(r * 0.62) + 8
+        err = self._font_xl.render("ERROR", True, (255, 255, 255))
+        s.blit(err, err.get_rect(center=(cx, bottom_y + 24)))
+
+        # Dòng mô tả
+        sub1 = self._font_lg.render("STM32 khong phan hoi", True, (255, 80, 80))
+        sub2 = self._font_md.render("Dang cho ket noi...", True, (160, 160, 160))
+        sub3 = self._font_sm.render("Nhan Q hoac ESC de thoat", True, (60, 60, 60))
+        s.blit(sub1, sub1.get_rect(center=(cx, bottom_y + 58)))
+        s.blit(sub2, sub2.get_rect(center=(cx, bottom_y + 78)))
+        s.blit(sub3, sub3.get_rect(center=(cx, bottom_y + 96)))
+
+        sw, sh = self._screen.get_size()
+        pygame.transform.scale(self._buf, (sw, sh), self._screen)
+        pygame.display.flip()
+        self._clock.tick(15)
+        return True
+
     # ── Render ─────────────────────────────────────────────
 
     def _render(self):

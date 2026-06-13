@@ -54,7 +54,7 @@ UART_STM32_BAUD  = 115200
 STM32_RESET_PIN  = None
 
 # ── Audio volume (0–30, default 25) ───────────────────────
-MP3_VOLUME          = 15
+MP3_VOLUME          = 5
 
 # ── Audio tracks played via STM32 → MP3-TF-16P ────────────
 TRACK_INVITE_SCAN   = 1   # "Please scan your card"
@@ -90,3 +90,7 @@ GPS_FETCH_INTERVAL = 5.0   # seconds between RTDB pulls when GPS_SOURCE = 1
 STOP_ARRIVAL_RADIUS_M = 10    # metres from stop centre to trigger arrival
 STOP_WAIT_TIMEOUT_S   = 120   # seconds to wait before sending reminder FCM
 STOP_FINAL_WAIT_S     = 300   # seconds to wait after reminder before moving on
+
+# ── Debug flags ───────────────────────────────────────────────
+# Đặt True để test màn hình lỗi STM32 mà không cần ngắt dây vật lý
+DEBUG_FORCE_STM32_ERROR = True
