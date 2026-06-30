@@ -81,7 +81,7 @@ class StopManager:
         travel_s = (max_dist / 1000.0) / 40.0 * 3600.0
         self.min_board_seconds = max(60, int(travel_s * 0.8))
         print(f"  [STOP] min_board_seconds = {self.min_board_seconds}s "
-              f"(xa nhất: {max_dist:.0f}m, 40km/h, 80%)")
+              f"(farthest: {max_dist:.0f}m, 40km/h, 80%)")
 
     # ── Route state ───────────────────────────────────────
 
@@ -212,7 +212,7 @@ class StopManager:
         if new_idx < len(self._stops):
             next_name = self._stops[new_idx]["name"]
         else:
-            next_name = self._school.get("name", "Trường")
+            next_name = self._school.get("name", "School")
         print(f"  [STOP] → {prev_name} → {next_name}")
 
     @staticmethod
@@ -323,7 +323,7 @@ class AttendanceSystem:
         threading.Thread(target=self._detection_worker, daemon=True).start()
 
     def _load_models(self):
-        print("Đang load models...")
+        print("Loading models...")
         self.detector     = YuNetDetector(YUNET_PATH)
         self.det_detector = YuNetDetector(YUNET_PATH)  # instance riêng cho detection thread
         self.recognizer = BuffaloRecognizer()
@@ -337,9 +337,9 @@ class AttendanceSystem:
         self.att_db.ensure_students(uid_records)
         self._check_data_mismatch(uid_records)
         present, total = self.att_db.get_attendance_count()
-        print(f"  ✓ Database: {self.face_db.count} học sinh "
-              f"| {len(self.uid_map)} thẻ RFID "
-              f"| Đã điểm danh: {present}/{total}")
+        print(f"  ✓ Database: {self.face_db.count} students "
+              f"| {len(self.uid_map)} RFID cards "
+              f"| Present: {present}/{total}")
 
     def _build_uid_map(self, uid_records: list) -> dict:
         """uid_hex → {"full_name", "class_name", "uid"}"""
@@ -359,12 +359,12 @@ class AttendanceSystem:
         for name in set(face_map) & set(rfid_map):
             if face_map[name] != rfid_map[name]:
                 if not warned:
-                    print("\n  ⚠ CẢNH BÁO DỮ LIỆU KHÔNG KHỚP:")
+                    print("\n  ⚠ DATA MISMATCH WARNING:")
                     warned = True
-                print(f"    Tên  : {name}")
-                print(f"    Ảnh  : lớp {face_map[name]}")
-                print(f"    RFID : lớp {rfid_map[name]}")
-                print(f"    → Người này sẽ KHÔNG điểm danh được!")
+                print(f"    Name : {name}")
+                print(f"    Photo: class {face_map[name]}")
+                print(f"    RFID : class {rfid_map[name]}")
+                print(f"    → This student CANNOT check in!")
         if warned:
             print()
 
@@ -384,18 +384,18 @@ class AttendanceSystem:
         self.stm32.open()
 
         # Wait up to 30s for handshake (bỏ qua nếu đang test error screen)
-        print("  Chờ STM32 READY...", end="", flush=True)
+        print("  Waiting for STM32 READY...", end="", flush=True)
         if not DEBUG_FORCE_STM32_ERROR:
             deadline = time.time() + 30
             while not self._handshake_done and time.time() < deadline:
                 time.sleep(0.1)
 
         if self._handshake_done:
-            print(" ✓ STM32 sẵn sàng")
+            print(" ✓ STM32 ready")
             return
 
-        # Timeout — hiện màn hình lỗi và chờ vô hạn
-        print("\n  ✗ STM32 chưa phản hồi — chờ READY...")
+        # Timeout — show error screen and wait indefinitely
+        print("\n  ✗ STM32 not responding — waiting for READY...")
         while not self._handshake_done:
             if self._display:
                 still_running = self._display.show_stm32_error()
@@ -404,11 +404,11 @@ class AttendanceSystem:
                     raise SystemExit(0)
             else:
                 time.sleep(0.5)
-        print("  ✓ STM32 sẵn sàng")
+        print("  ✓ STM32 ready")
 
     def _start_camera(self):
         from libcamera import controls
-        print("Đang mở camera...")
+        print("Opening camera...")
         self._picam2 = Picamera2()
         self._picam2.configure(self._picam2.create_preview_configuration(
             main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT), "format": "RGB888"}
@@ -420,15 +420,15 @@ class AttendanceSystem:
         })
         time.sleep(2)
         self.cam_thread = CameraThread(self._picam2)
-        print(f"  ✓ Camera {CAMERA_WIDTH}×{CAMERA_HEIGHT} sẵn sàng")
+        print(f"  ✓ Camera {CAMERA_WIDTH}x{CAMERA_HEIGHT} ready")
 
     def _init_display(self):
         self._display = BusDisplay(route="TUYEN 01", fullscreen=True)
-        print("  ✓ Pygame display sẵn sàng")
+        print("  ✓ Display ready")
 
     def _start_gps_from_rtdb(self):
         """GPS_SOURCE=1: fetch bus/gps từ Realtime Database mỗi GPS_FETCH_INTERVAL giây."""
-        print(f"  [GPS] Chế độ RTDB — fetch mỗi {GPS_FETCH_INTERVAL}s")
+        print(f"  [GPS] RTDB mode — fetching every {GPS_FETCH_INTERVAL}s")
 
         def _loop():
             while True:
@@ -447,7 +447,7 @@ class AttendanceSystem:
                             if self._stop_mgr:
                                 self._stop_mgr.on_gps(lat, lon, speed)
                 except Exception as e:
-                    print(f"  [GPS] RTDB fetch lỗi: {e}")
+                    print(f"  [GPS] RTDB fetch error: {e}")
                 time.sleep(GPS_FETCH_INTERVAL)
                 if not self._running and self._handshake_done:
                     break
@@ -456,14 +456,14 @@ class AttendanceSystem:
 
     def _init_cloud(self):
         from .cloud_sync import CloudSync
-        print("Đang kết nối hệ sinh thái Cloud Firebase (Realtime + Firestore)...")
+        print("Connecting to Firebase (Realtime + Firestore)...")
         self._cloud = CloudSync(
             service_account_path=SERVICE_ACCOUNT_PATH,
             database_url=FIREBASE_URL
         )
 
         if self._cloud.initialized:
-            print("  ✓ Đang kiểm tra cấu hình Học sinh từ Server...")
+            print("  ✓ Checking student config from server...")
             existing = self.att_db.get_all_students()
             synced_records, images_changed = self._cloud.sync_students_to_pi(
                 STUDENTS_DIR, existing
@@ -473,9 +473,9 @@ class AttendanceSystem:
                 if images_changed:
                     if os.path.exists(DB_FILE):
                         os.remove(DB_FILE)
-                    print("  ✓ Cache embedding cũ đã xóa → sẽ rebuild từ ảnh Firebase")
+                    print("  ✓ Old embedding cache deleted → will rebuild from Firebase images")
                 else:
-                    print("  ✓ Embedding giữ nguyên (không cần rebuild)")
+                    print("  ✓ Embedding unchanged (no rebuild needed)")
 
             # Reset attendanceStatus (preserves "absent" for leave-approved students)
             self._cloud.reset_all_attendance_status()
@@ -528,7 +528,7 @@ class AttendanceSystem:
     # ── Main loop ─────────────────────────────────────────
 
     def run(self):
-        print("\nNhấn Q hoặc ESC để thoát.\n")
+        print("\nPress Q or ESC to exit.\n")
         self._running        = True
         self._display_student = {}
 
@@ -566,8 +566,9 @@ class AttendanceSystem:
 
                 self._frame_counter += 1
                 self._det_frame = frame
-                self._inf_frame = frame
-                self._inf_event.set()
+                if self._rfid_pending:
+                    self._inf_frame = frame
+                    self._inf_event.set()
 
                 self._try_master_confirm(frame)
                 self._try_confirm(frame)
@@ -658,7 +659,8 @@ class AttendanceSystem:
         self._inference_times.append(time.time() - t0)
 
     def _inference_worker(self):
-        """Dedicated inference thread — chỉ nhận diện khi có RFID đang chờ xác nhận."""
+        """Dedicated inference thread — chỉ nhận diện khi có RFID đang chờ xác nhận, capped at 10fps."""
+        _INF_INTERVAL = 0.10
         while self._running:
             triggered = self._inf_event.wait(timeout=0.5)
             if not triggered:
@@ -667,6 +669,7 @@ class AttendanceSystem:
             if not self._rfid_pending:
                 self._last_results = []
                 continue
+            t0 = time.time()
             # Lấy full_key của học sinh RFID đầu tiên đang pending
             target_key = None
             for (full_name, class_name) in self._rfid_pending:
@@ -678,14 +681,19 @@ class AttendanceSystem:
             frame = self._inf_frame
             if frame is not None:
                 self._run_inference(frame, time.time(), target_key=target_key)
+            sleep_t = _INF_INTERVAL - (time.time() - t0)
+            if sleep_t > 0:
+                time.sleep(sleep_t)
 
     def _detection_worker(self):
-        """Fast detection thread — YuNet trên frame 1/2 kích thước (~15ms vs ~40ms full)."""
+        """Fast detection thread — YuNet trên frame 1/2 kích thước, capped at 15fps."""
+        _DET_INTERVAL = 1 / 15
         scale = 2
         while self._running:
+            t0 = time.time()
             frame = self._det_frame
             if frame is None:
-                time.sleep(0.005)
+                time.sleep(0.033)
                 continue
             h, w = frame.shape[:2]
             small = cv2.resize(frame, (w // scale, h // scale))
@@ -697,6 +705,9 @@ class AttendanceSystem:
                 }
                 for f in faces
             ]
+            sleep_t = _DET_INTERVAL - (time.time() - t0)
+            if sleep_t > 0:
+                time.sleep(sleep_t)
 
     # ── RFID handler ──────────────────────────────────────
 
@@ -710,7 +721,7 @@ class AttendanceSystem:
             self._master_until      = now + MASTER_KEY_TIMEOUT
             self._rfid_display_name  = "[MASTER KEY]"
             self._rfid_display_until = self._master_until
-            print(f"  [MASTER] Kích hoạt {MASTER_KEY_TIMEOUT}s")
+            print(f"  [MASTER] Activated for {MASTER_KEY_TIMEOUT}s")
             return
 
         rec = self.uid_map.get(uid_hex)
@@ -745,12 +756,12 @@ class AttendanceSystem:
             return
         elif alight_result == -1:
             # Scanned too soon after boarding — ignore
-            print(f"  [RFID] {full_name} — alighted too soon after boarding, ignored")
+            print(f"  [RFID] {_remove_accents(full_name)} — alighted too soon after boarding, ignored")
             return
 
         # alight_result == 0 → not yet boarded → boarding flow: wait for face
         self._rfid_pending[(full_name, class_name)] = now
-        print(f"  [RFID] {full_name} ({class_name}) — waiting for face verification")
+        print(f"  [RFID] {_remove_accents(full_name)} ({class_name}) — waiting for face verification")
 
     # ── 2-factor confirm ──────────────────────────────────
 
@@ -780,7 +791,7 @@ class AttendanceSystem:
         if not self._master_mode:
             return
         if time.time() > self._master_until:
-            print("  [MASTER] Hết thời gian")
+            print("  [MASTER] Timeout")
             self._master_mode       = False
             self._rfid_display_name = ""
             return
@@ -816,7 +827,7 @@ class AttendanceSystem:
             if alight_result == 1:
                 self._record_alighted(uid, info["full_name"], info["class_name"])
             elif alight_result == -1:
-                print(f"  [MASTER] {info['full_name']} — boarded too recently to alight")
+                print(f"  [MASTER] {_remove_accents(info['full_name'])} — boarded too recently to alight")
                 self._play_important(TRACK_FACE_MISMATCH)
             else:
                 self._record_attendance(face_key, frame_bgr, is_master=True)
@@ -849,7 +860,7 @@ class AttendanceSystem:
         self._attendance_log.append((f"{full_name}{tag}", ts))
         self._last_log.append((full_name, ts, is_master))
         session = self._current_session()
-        print(f"  ✓ ĐIỂM DANH{tag} [{session}]: {full_name} | lớp {class_name} | {ts}")
+        print(f"  ✓ ATTENDANCE{tag} [{session}]: {_remove_accents(full_name)} | class {class_name} | {ts}")
         print(f"    → {img_path}")
 
         self._play_important(TRACK_AUTH_OK)
@@ -883,7 +894,7 @@ class AttendanceSystem:
         """Record alighting event and push to cloud (called from RFID handler thread)."""
         ts = time.strftime("%H:%M:%S")
         session = self._current_session()
-        print(f"  ✓ XUỐNG XE [{session}]: {full_name} | lớp {class_name} | {ts}")
+        print(f"  ✓ ALIGHTED [{session}]: {_remove_accents(full_name)} | class {class_name} | {ts}")
         self._play_important(TRACK_AUTH_OK)
 
         if self._cloud:
@@ -1097,20 +1108,20 @@ class AttendanceSystem:
 
     def _print_summary(self):
         print("\n" + "=" * 55)
-        print("  KẾT QUẢ ĐIỂM DANH")
+        print("  ATTENDANCE SUMMARY")
         print("=" * 55)
         try:
             for row in self.att_db.get_rows():
-                status = "✓ Có mặt" if row["Status"] == "1" else "✗ Vắng"
-                print(f"  {status}  {row['FullName']}  (lớp {row['Class']})")
+                status = "✓ Present" if row["Status"] == "1" else "✗ Absent"
+                print(f"  {status}  {_remove_accents(row['FullName'])}  (class {row['Class']})")
             if self._attendance_log:
-                print("\nChi tiết:")
+                print("\nDetails:")
                 for name, ts in self._attendance_log:
-                    print(f"  {ts}  {name}")
+                    print(f"  {ts}  {_remove_accents(name)}")
             present, total = self.att_db.get_attendance_count()
-            print(f"\nTổng    : {present}/{total}")
+            print(f"\nTotal   : {present}/{total}")
         except Exception as e:
-            print(f"  (lỗi đọc DB: {e})")
+            print(f"  (DB read error: {e})")
         if self._inference_times:
             print(f"Inf avg : {np.mean(self._inference_times) * 1000:.0f}ms")
         print(f"DB      : {os.path.abspath(self.att_db.db_path)}")

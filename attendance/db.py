@@ -102,7 +102,7 @@ class AttendanceDB:
             self._conn.execute(
                 "ALTER TABLE students ADD COLUMN student_id TEXT"
             )
-            print("  ✓ Migrate: student_id column added (sẽ được sync từ Firebase)")
+            print("  ✓ Migrate: student_id column added (will be synced from Firebase)")
 
         # ── Migrate attendance_records: GPS boarded + alighted ───
         existing = {row[1] for row in self._conn.execute(
@@ -155,7 +155,7 @@ class AttendanceDB:
                 (today, self.route),
             )
             self._session_id = cur.lastrowid
-            print(f"  ✓ Tạo session mới: {today} | {self.route}")
+            print(f"  ✓ New session: {today} | {self.route}")
 
         return self._session_id
 
@@ -208,7 +208,7 @@ class AttendanceDB:
                 VALUES (?, ?, 0)
             """, (session_id, sid))
 
-        print(f"  ✓ Đồng bộ {len(uid_records)} học sinh vào DB")
+        print(f"  ✓ Synced {len(uid_records)} students to DB")
 
     def get_all_students(self) -> list[dict]:
         """Return all students."""
@@ -226,11 +226,11 @@ class AttendanceDB:
 
         if existing:
             if existing["full_name"] == full_name and existing["class_name"] == class_name:
-                print(f"  ℹ Đã tồn tại: {full_name},{class_name},{uid} — bỏ qua")
+                print(f"  ℹ Already exists: {full_name},{class_name},{uid} — skipping")
                 return
-            print(f"  ⚠ UID {uid} đã đăng ký cho {existing['full_name']} "
+            print(f"  ⚠ UID {uid} already registered for {existing['full_name']} "
                   f"({existing['class_name']})")
-            print(f"    → Cập nhật thành: {full_name} ({class_name})")
+            print(f"    → Updating to: {full_name} ({class_name})")
             self._conn.execute(
                 "UPDATE students SET full_name=?, class_name=? WHERE uid=?",
                 (full_name, class_name, uid)
@@ -240,10 +240,10 @@ class AttendanceDB:
                 "INSERT INTO students (full_name, class_name, uid) VALUES (?, ?, ?)",
                 (full_name, class_name, uid)
             )
-            print(f"  ✓ Đã thêm: {full_name},{class_name},{uid}")
+            print(f"  ✓ Added: {full_name},{class_name},{uid}")
 
         count = self._conn.execute("SELECT COUNT(*) FROM students").fetchone()[0]
-        print(f"  → Tổng: {count} học sinh")
+        print(f"  → Total: {count} students")
 
     # ══════════════════════════════════════════════════════
     # UID MAP
@@ -370,8 +370,8 @@ class AttendanceDB:
             elapsed = _to_sec(ts) - _to_sec(row["checked_at"])
             if elapsed < min_board_seconds:
                 remaining = min_board_seconds - elapsed
-                print(f"    [DB] Vừa lên xe {elapsed//60:.0f}p{elapsed%60:.0f}s trước "
-                      f"— còn {remaining//60:.0f}p{remaining%60:.0f}s nữa mới được xuống")
+                print(f"    [DB] Boarded {elapsed//60:.0f}m{elapsed%60:.0f}s ago "
+                      f"— need {remaining//60:.0f}m{remaining%60:.0f}s more before alighting")
                 return -1
 
         self._conn.execute("""

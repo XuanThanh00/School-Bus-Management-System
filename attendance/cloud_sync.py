@@ -112,7 +112,7 @@ class CloudSync:
                         os.remove(os.path.join(reference_dir, old_f))
                         deleted += 1
                 if deleted:
-                    print(f"  [CLOUD] Đã xóa {deleted} ảnh cũ trước khi tải lại")
+                    print(f"  [CLOUD] Deleted {deleted} old images before re-downloading")
 
             full_docs = self.fs_db.collection("students").stream()
             count = 0
@@ -361,7 +361,7 @@ class CloudSync:
                 data = doc.to_dict()
                 result = {
                     "id":   "school",
-                    "name": data.get("name", "Trường"),
+                    "name": data.get("name", "School"),
                     "lat":  data.get("lat", 0.0),
                     "lng":  data.get("lng", 0.0),
                 }

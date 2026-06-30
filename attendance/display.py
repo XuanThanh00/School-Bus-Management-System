@@ -242,7 +242,7 @@ class BusDisplay:
         s.blit(err, err.get_rect(center=(cx, bottom_y + 24)))
 
         # Dòng mô tả
-        sub1 = self._font_lg.render("STM32 khong phan hoi", True, (255, 80, 80))
+        sub1 = self._font_lg.render("STM32 chua phan hoi", True, (255, 80, 80))
         sub2 = self._font_md.render("Dang cho ket noi...", True, (160, 160, 160))
         sub3 = self._font_sm.render("Nhan Q hoac ESC de thoat", True, (60, 60, 60))
         s.blit(sub1, sub1.get_rect(center=(cx, bottom_y + 58)))
