@@ -3,6 +3,7 @@
 import os
 import time
 import threading
+import unicodedata
 from collections import deque
 
 import cv2
@@ -32,6 +33,13 @@ from .overlay         import draw_frame
 from .db              import AttendanceDB
 from .display         import BusDisplay
 from .stm32_protocol  import STM32Protocol, FLAG_GPS_FIX
+
+
+def _remove_accents(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
 
 
 # ──────────────────────────────────────────────────────────
@@ -387,7 +395,7 @@ class AttendanceSystem:
             return
 
         # Timeout — hiện màn hình lỗi và chờ vô hạn
-        print("\n  ✗ STM32 không phản hồi sau 30s — chờ READY...")
+        print("\n  ✗ STM32 chưa phản hồi — chờ READY...")
         while not self._handshake_done:
             if self._display:
                 still_running = self._display.show_stm32_error()
@@ -396,7 +404,7 @@ class AttendanceSystem:
                     raise SystemExit(0)
             else:
                 time.sleep(0.5)
-        print("  ✓ STM32 sẵn sàng (sau chờ)")
+        print("  ✓ STM32 sẵn sàng")
 
     def _start_camera(self):
         from libcamera import controls
@@ -714,7 +722,7 @@ class AttendanceSystem:
         full_name  = rec["full_name"]
         class_name = rec["class_name"]
 
-        self._rfid_display_name  = f"ID: {full_name}"
+        self._rfid_display_name  = "ID: " + _remove_accents(full_name)
         self._rfid_display_until = now + 5
         self._disp_rfid_name     = full_name
         self._disp_rfid_class    = class_name
