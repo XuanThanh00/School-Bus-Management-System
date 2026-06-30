@@ -337,11 +337,6 @@ class BusDisplay:
             st = self._font_sm.render(sub, True, COLOR_GRAY)
             s.blit(st, (x + pad, y + 52))
 
-        # Score
-        if self._face_score > 0:
-            sc_color = COLOR_GREEN if self._face_status == "OK" else COLOR_YELLOW
-            sc = self._font_sm.render(f"Score: {self._face_score:.2f}", True, sc_color)
-            s.blit(sc, (x + pad, y + 70))
 
         # UID khi OK
         if self._face_status == "OK" and self._rfid_uid:

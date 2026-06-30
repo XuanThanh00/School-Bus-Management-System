@@ -5,11 +5,19 @@
 # ══════════════════════════════════════════════════════════
 
 import time
+import unicodedata
 
 import cv2
 import numpy as np
 
 from .config import CAMERA_WIDTH, THRESHOLD
+
+
+def _no_accent(text: str) -> str:
+    return "".join(
+        c for c in unicodedata.normalize("NFD", text)
+        if unicodedata.category(c) != "Mn"
+    )
 
 
 def _match_result(det_bbox, results, max_dist: int = 80):
@@ -73,7 +81,7 @@ def draw_frame(
         full_key = result.get("full_key") if result else None
         score    = result.get("score", 0.0) if result else 0.0
         info     = key_info.get(full_key) if full_key else None
-        name     = info["display"] if info else "?"
+        name     = _no_accent(info["display"]) if info else "?"
 
         face_key = (info["full_name"], info["class_name"]) if info else None
         if face_key and face_key in confirmed_set:
@@ -81,7 +89,7 @@ def draw_frame(
             label = f"{name} OK"
         elif result and score >= THRESHOLD:
             color = (55, 138, 221)
-            label = f"{name} {score:.2f}"
+            label = name
         else:
             color = (60, 60, 200)
             label = "?"
@@ -95,10 +103,6 @@ def draw_frame(
         cv2.putText(out, label, (x + 3, y - 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Score bar
-        fill = int(w * min(score, 1.0))
-        cv2.rectangle(out, (x, y + h + 2), (x + w, y + h + 6), (40, 40, 40), -1)
-        cv2.rectangle(out, (x, y + h + 2), (x + fill, y + h + 6), color, -1)
 
     # ── Master key banner ──────────────────────────────────
     if master_mode:
