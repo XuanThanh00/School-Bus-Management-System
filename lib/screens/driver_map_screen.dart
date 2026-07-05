@@ -11,6 +11,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
+import '../utils/route_geometry.dart';
 import '../widgets/shared_widgets.dart';
 
 // ── Models ────────────────────────────────────────────
@@ -110,6 +111,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   List<_StopData>  _stops        = [];
   _SchoolData?     _school;
   int              _currentIdx   = 0;   // index trong _stops đang hướng tới
+
+  // Mốc 12h trưa: sáng đón theo order 1→N, chiều trả ngược lại N→1 (trường vẫn là điểm cuối).
+  // Chốt 1 lần khi mở màn hình để route không bị đảo giữa chừng nếu chạy qua 12h.
+  late final bool _isAfternoon = DateTime.now().hour >= 12;
 
   List<LatLng>     _route        = [];  // tuyến còn lại: myPos → stops[_currentIdx:] → school
   LatLng?          _lastFetchPos;
@@ -258,11 +263,13 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
     FirebaseDatabase.instance.ref('bus/route').set({
       'polyline':       _encodePolyline(_route),
       'currentStopIdx': _currentIdx,
+      'session':        _isAfternoon ? 'afternoon' : 'morning',
       'updatedAt':      ServerValue.timestamp,
       'stops': _stops
           .asMap()
           .entries
           .map((e) => {
+                'id':    e.value.id,
                 'name':  e.value.name,
                 'lat':   e.value.lat,
                 'lng':   e.value.lng,
@@ -352,12 +359,13 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
         ));
       }
 
-      // Sắp xếp theo order tăng dần
+      // Sắp xếp theo order tăng dần (sáng đón 1→N); chiều trả nên đi ngược N→1
       loaded.sort((a, b) => a.order.compareTo(b.order));
+      final ordered = _isAfternoon ? loaded.reversed.toList() : loaded;
 
       if (mounted) {
         setState(() {
-          _stops        = loaded;
+          _stops        = ordered;
           _loadingStops = false;
         });
         if (_myPos != null) _fetchRoutes();
@@ -444,6 +452,11 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
   // ── Map ───────────────────────────────────────────────
 
   Widget _buildMap() {
+    // Offset sang phải theo hướng đi để 2 chiều đi/về trên cùng đoạn đường
+    // tách thành 2 vệt; màu tuyến theo buổi (xanh sáng / cam chiều)
+    final drawRoute = offsetPolyline(_route);
+    final lineColor = sessionColor(_isAfternoon);
+
     return Stack(
       children: [
         FlutterMap(
@@ -465,17 +478,19 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
               userAgentPackageName: 'com.example.school_bus_app',
             ),
 
-            // Tuyến đường còn lại
-            if (_route.isNotEmpty)
+            // Tuyến đường còn lại + mũi tên chỉ hướng
+            if (drawRoute.isNotEmpty) ...[
               PolylineLayer(polylines: [
                 Polyline(
-                  points:            _route,
-                  color:             AppColors.accent,
+                  points:            drawRoute,
+                  color:             lineColor,
                   strokeWidth:       5,
                   borderColor:       Colors.white,
                   borderStrokeWidth: 1.5,
                 ),
               ]),
+              MarkerLayer(markers: buildArrowMarkers(drawRoute, lineColor)),
+            ],
 
             // School marker
             if (_school != null)
@@ -604,6 +619,35 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
                             style: GoogleFonts.dmSans(
                                 fontSize: 12,
                                 color: Colors.white.withValues(alpha: 0.75)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Session badge (sáng đón / chiều trả)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      margin: const EdgeInsets.only(right: 6),
+                      decoration: BoxDecoration(
+                        color:        Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _isAfternoon
+                                ? Icons.wb_twilight_rounded
+                                : Icons.wb_sunny_rounded,
+                            color: Colors.white, size: 13,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isAfternoon ? 'Chiều · Trả' : 'Sáng · Đón',
+                            style: GoogleFonts.dmSans(
+                                fontSize:   12,
+                                color:      Colors.white,
+                                fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -769,7 +813,10 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Lộ trình hôm nay',
+              Text(
+                  _isAfternoon
+                      ? 'Lộ trình chiều · Trả học sinh'
+                      : 'Lộ trình sáng · Đón học sinh',
                   style: GoogleFonts.dmSans(
                       fontSize:   12,
                       fontWeight: FontWeight.w600,

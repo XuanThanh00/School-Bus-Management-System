@@ -5,9 +5,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme/app_theme.dart';
+import '../utils/route_geometry.dart';
 import '../widgets/shared_widgets.dart';
+
+// Màu highlight trạm đón/trả của con — nổi bật, không trùng màu tuyến/trạm
+const _childColor = Color(0xFFE91E63);
 
 // ── Models ────────────────────────────────────────────
 
@@ -16,9 +21,7 @@ class _GpsData {
   final double lng;
   final double speed; // km/h
   final bool   reachedDestination;
-  final String routeFromId;
   final String routeFromName;
-  final String routeToId;
   final String routeToName;
 
   const _GpsData({
@@ -26,9 +29,7 @@ class _GpsData {
     required this.lng,
     required this.speed,
     this.reachedDestination = false,
-    this.routeFromId   = '',
     this.routeFromName = '',
-    this.routeToId     = '',
     this.routeToName   = '',
   });
 
@@ -37,9 +38,7 @@ class _GpsData {
     lng:   (map['lng'] as num).toDouble(),
     speed: (map['speed'] as num?)?.toDouble() ?? 0.0,
     reachedDestination: map['reachedDestination'] as bool?   ?? false,
-    routeFromId:        map['routeFromId']        as String? ?? '',
     routeFromName:      map['routeFromName']      as String? ?? '',
-    routeToId:          map['routeToId']          as String? ?? '',
     routeToName:        map['routeToName']        as String? ?? '',
   );
 }
@@ -50,6 +49,7 @@ class _StopData {
   final double lat;
   final double lng;
   final int order;
+  final bool done; // đã đi qua — theo dữ liệu tài xế đẩy lên bus/route
 
   const _StopData({
     required this.id,
@@ -57,9 +57,35 @@ class _StopData {
     required this.lat,
     required this.lng,
     required this.order,
+    this.done = false,
   });
 
   LatLng get latLng => LatLng(lat, lng);
+}
+
+// ── Decode Google Encoded Polyline ───────────────────
+
+List<LatLng> _decodePolyline(String encoded) {
+  final points = <LatLng>[];
+  int index = 0, lat = 0, lng = 0;
+  while (index < encoded.length) {
+    int shift = 0, result = 0, b;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lat += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    shift = 0; result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    lng += (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    points.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return points;
 }
 
 // ── Haversine distance (km) ───────────────────────────
@@ -112,14 +138,32 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   final _mapController = MapController();
   StreamSubscription? _gpsSub;
-  _GpsData? _gps;
-  _SchoolData? _school;
-  List<_StopData> _stops = [];
-  bool _loadingGps = true;
-  bool _loadingStops = true;
+  StreamSubscription? _routeSub;
+  _GpsData?       _gps;
+  _SchoolData?    _school;
+  List<_StopData> _stops       = []; // theo đúng thứ tự tài xế đang chạy (từ bus/route)
+  List<LatLng>    _routePoints = []; // decoded OSRM polyline từ bus/route
+  String          _session        = 'morning';
+  int             _currentStopIdx = 0;
+  String          _childStopId    = ''; // busStopId của con → highlight trạm đón/trả
+  String          _childName      = '';
+  bool _loadingGps    = true;
+  bool _loadingRoute  = true;
   bool _loadingSchool = true;
+  bool _autoFollow    = true; // false khi phụ huynh tự kéo/zoom bản đồ
 
-  bool get _loading => _loadingGps || _loadingStops || _loadingSchool;
+  bool get _loading => _loadingGps || _loadingRoute || _loadingSchool;
+
+  bool get _isAfternoonSession => _session == 'afternoon';
+
+  int get _childStopIdx => _childStopId.isEmpty
+      ? -1
+      : _stops.indexWhere((s) => s.id == _childStopId);
+
+  _StopData? get _childStop {
+    final i = _childStopIdx;
+    return i < 0 ? null : _stops[i];
+  }
 
   double get _schoolLat => _school?.lat ?? 10.8503;
   double get _schoolLng => _school?.lng ?? 106.7717;
@@ -168,13 +212,15 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _loadSchool();
-    _loadStops();
+    _loadChildStop();
     _listenGps();
+    _listenRoute();
   }
 
   @override
   void dispose() {
     _gpsSub?.cancel();
+    _routeSub?.cancel();
     super.dispose();
   }
 
@@ -198,28 +244,85 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
-  Future<void> _loadStops() async {
+  // Trạm của con: parents(email) → studentIds.first → students.busStopId
+  Future<void> _loadChildStop() async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('busStops')
-          .where('isActive', isEqualTo: true)
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final fs = FirebaseFirestore.instance;
+      final parentSnap = await fs
+          .collection('parents')
+          .where('email', isEqualTo: user.email)
+          .limit(1)
           .get();
-      final stops = snap.docs.map((doc) {
-        final d   = doc.data();
-        final loc = d['location'] as Map<String, dynamic>? ?? {};
-        return _StopData(
-          id:    doc.id,
-          name:  d['name']?.toString() ?? '',
-          lat:   (loc['lat'] as num?)?.toDouble() ?? 0.0,
-          lng:   (loc['lng'] as num?)?.toDouble() ?? 0.0,
-          order: (d['order'] as num?)?.toInt() ?? 0,
-        );
-      }).toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
-      if (mounted) setState(() { _stops = stops; _loadingStops = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loadingStops = false);
-    }
+      if (parentSnap.docs.isEmpty) return;
+      final studentIds =
+          List<String>.from(parentSnap.docs.first.data()['studentIds'] ?? []);
+      if (studentIds.isEmpty) return;
+      final studentSnap = await fs
+          .collection('students')
+          .where('studentId', isEqualTo: studentIds.first)
+          .limit(1)
+          .get();
+      if (studentSnap.docs.isEmpty) return;
+      final d = studentSnap.docs.first.data();
+      if (mounted) {
+        setState(() {
+          _childStopId = d['busStopId']?.toString() ?? '';
+          _childName   = d['name']?.toString() ?? '';
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Nguồn duy nhất về lộ trình là bus/route do app tài xế đẩy lên.
+  // Stops trong đó đã theo đúng thứ tự chạy thực tế (buổi chiều = đảo ngược),
+  // nên phía phụ huynh không cần biết logic sáng/chiều.
+  void _listenRoute() {
+    _routeSub = FirebaseDatabase.instance
+        .ref('bus/route')
+        .onValue
+        .listen((event) {
+      if (!mounted) return;
+      var points     = <LatLng>[];
+      var stops      = <_StopData>[];
+      var session    = 'morning';
+      var currentIdx = 0;
+      final v = event.snapshot.value;
+      if (v is Map) {
+        try {
+          final data    = Map.from(v);
+          final encoded = data['polyline']?.toString() ?? '';
+          if (encoded.isNotEmpty) points = _decodePolyline(encoded);
+          session    = data['session']?.toString() ?? 'morning';
+          currentIdx = (data['currentStopIdx'] as num?)?.toInt() ?? 0;
+          final rawStops = data['stops'];
+          if (rawStops is List) {
+            for (final raw in rawStops) {
+              if (raw is! Map) continue;
+              final m = Map.from(raw);
+              stops.add(_StopData(
+                id:    m['id']?.toString() ?? '',
+                name:  m['name']?.toString() ?? '',
+                lat:   (m['lat'] as num?)?.toDouble() ?? 0.0,
+                lng:   (m['lng'] as num?)?.toDouble() ?? 0.0,
+                order: (m['order'] as num?)?.toInt() ?? 0,
+                done:  m['done'] == true,
+              ));
+            }
+          }
+        } catch (_) {}
+      }
+      setState(() {
+        _routePoints    = points;
+        _stops          = stops;
+        _session        = session;
+        _currentStopIdx = currentIdx;
+        _loadingRoute   = false;
+      });
+    }, onError: (_) {
+      if (mounted) setState(() => _loadingRoute = false);
+    });
   }
 
   void _listenGps() {
@@ -234,9 +337,11 @@ class _MapScreenState extends State<MapScreen> {
             final data =
             _GpsData.fromMap(Map.from(event.snapshot.value as Map));
             setState(() { _gps = data; _loadingGps = false; });
-            try {
-              _mapController.move(_busPosition, _mapController.camera.zoom);
-            } catch (_) {}
+            if (_autoFollow) {
+              try {
+                _mapController.move(_busPosition, _mapController.camera.zoom);
+              } catch (_) {}
+            }
           } catch (_) {
             if (mounted) setState(() => _loadingGps = false);
           }
@@ -273,28 +378,32 @@ class _MapScreenState extends State<MapScreen> {
     return null;
   }
 
-  bool _isDone(_StopData stop) {
-    final gps = _gps;
-    if (gps != null && gps.routeFromId.isNotEmpty) {
-      final fromIdx = _stops.indexWhere((s) => s.id == gps.routeFromId);
-      if (fromIdx >= 0) return stop.order <= _stops[fromIdx].order;
-    }
-    // fallback: haversine-based
-    final ref = _arrivedStop ?? _nearestStop;
-    if (ref == null) return false;
-    return stop.order < ref.order;
+  // Khoảng cách + ETA từ xe đến trạm của con
+  String get _distToChildStop {
+    final gps  = _gps;
+    final stop = _childStop;
+    if (gps == null || stop == null) return '--';
+    final km = _haversineKm(gps.lat, gps.lng, stop.lat, stop.lng);
+    return km < 1 ? '${(km * 1000).round()} m' : '${km.toStringAsFixed(1)} km';
   }
 
-  bool _isCurrent(_StopData stop) {
-    final gps = _gps;
-    if (gps != null && gps.reachedDestination && gps.routeToId.isNotEmpty) {
-      return stop.id == gps.routeToId;
-    }
-    return stop == _arrivedStop;
+  String get _etaToChildStop {
+    final gps  = _gps;
+    final stop = _childStop;
+    if (gps == null || stop == null || gps.speed < 1) return '--:--';
+    final km  = _haversineKm(gps.lat, gps.lng, stop.lat, stop.lng);
+    final eta = DateTime.now()
+        .add(Duration(minutes: ((km / gps.speed) * 60).round()));
+    return '${eta.hour.toString().padLeft(2, '0')}:${eta.minute.toString().padLeft(2, '0')}';
   }
 
   @override
   Widget build(BuildContext context) {
+    // Offset tuyến sang phải theo hướng đi để 2 chiều đi/về tách vệt;
+    // màu theo buổi do tài xế đẩy lên (xanh = sáng đón, cam = chiều trả)
+    final drawRoute = offsetPolyline(_routePoints);
+    final lineColor = sessionColor(_isAfternoonSession);
+
     return Scaffold(
       body: Column(
         children: [
@@ -310,6 +419,11 @@ class _MapScreenState extends State<MapScreen> {
                     initialZoom: 14,
                     minZoom: 10,
                     maxZoom: 18,
+                    onPositionChanged: (_, hasGesture) {
+                      if (hasGesture && _autoFollow) {
+                        setState(() => _autoFollow = false);
+                      }
+                    },
                   ),
                   children: [
                     TileLayer(
@@ -318,18 +432,29 @@ class _MapScreenState extends State<MapScreen> {
                       userAgentPackageName: 'com.example.school_bus_app',
                     ),
 
-                    // Stop route polyline
-                    if (_stops.isNotEmpty)
-                      PolylineLayer(
-                        polylines: [
-                          Polyline(
-                            points: _stops.map((s) => s.latLng).toList(),
-                            color: AppColors.primary.withValues(alpha:0.6),
-                            strokeWidth: 4,
-                            pattern: StrokePattern.dashed(segments: [10, 5]),
-                          ),
-                        ],
-                      ),
+                    // Tuyến thực từ tài xế (bus/route) + mũi tên chỉ hướng
+                    // Fallback về đường thẳng nối trạm nếu chưa có polyline
+                    if (drawRoute.isNotEmpty) ...[
+                      PolylineLayer(polylines: [
+                        Polyline(
+                          points:            drawRoute,
+                          color:             lineColor,
+                          strokeWidth:       4,
+                          borderColor:       Colors.white,
+                          borderStrokeWidth: 1,
+                        ),
+                      ]),
+                      MarkerLayer(
+                          markers: buildArrowMarkers(drawRoute, lineColor)),
+                    ] else if (_stops.isNotEmpty)
+                      PolylineLayer(polylines: [
+                        Polyline(
+                          points:  _stops.map((s) => s.latLng).toList(),
+                          color:   lineColor.withValues(alpha: 0.4),
+                          strokeWidth: 3,
+                          pattern: StrokePattern.dashed(segments: const [10, 5]),
+                        ),
+                      ]),
 
                     // School marker
                     MarkerLayer(
@@ -351,12 +476,50 @@ class _MapScreenState extends State<MapScreen> {
                       ],
                     ),
 
-                    // Stop markers
+                    // Stop markers — theo route thực của tài xế;
+                    // trạm đón/trả của con highlight màu hồng riêng
                     if (_stops.isNotEmpty)
                       MarkerLayer(
-                        markers: _stops.map((stop) {
-                          final isDone = _isDone(stop);
-                          final isCurrent = _isCurrent(stop);
+                        markers: _stops.asMap().entries.map((entry) {
+                          final i    = entry.key;
+                          final stop = entry.value;
+                          final isDone    = stop.done;
+                          final isCurrent = i == _currentStopIdx;
+                          final isChild   = stop.id.isNotEmpty &&
+                              stop.id == _childStopId;
+
+                          if (isChild) {
+                            return Marker(
+                              point:  stop.latLng,
+                              width:  38,
+                              height: 38,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDone
+                                      ? AppColors.present
+                                      : _childColor,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: Colors.white, width: 2.5),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _childColor.withValues(alpha: 0.5),
+                                      blurRadius:   8,
+                                      spreadRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(
+                                  isDone
+                                      ? Icons.check_rounded
+                                      : Icons.escalator_warning_rounded,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            );
+                          }
+
                           return Marker(
                             point: stop.latLng,
                             width: 28,
@@ -442,7 +605,10 @@ class _MapScreenState extends State<MapScreen> {
                                           fontSize: 17,
                                           fontWeight: FontWeight.w600,
                                           color: Colors.white)),
-                                  Text('Tuyến 01  ·  ${_school?.name ?? 'HCMUTE'}',
+                                  Text(
+                                      _isAfternoonSession
+                                          ? 'Chuyến chiều · Trả học sinh'
+                                          : 'Chuyến sáng · Đón học sinh',
                                       style: GoogleFonts.dmSans(
                                           fontSize: 12,
                                           color: Colors.white.withValues(alpha:0.75))),
@@ -491,7 +657,10 @@ class _MapScreenState extends State<MapScreen> {
                   bottom: 12, right: 12,
                   child: FloatingActionButton.small(
                     backgroundColor: Colors.white,
-                    onPressed: () => _mapController.move(_busPosition, 15),
+                    onPressed: () {
+                      setState(() => _autoFollow = true);
+                      _mapController.move(_busPosition, 15);
+                    },
                     child: const Icon(Icons.my_location_rounded,
                         color: AppColors.primary, size: 20),
                   ),
@@ -514,6 +683,80 @@ class _MapScreenState extends State<MapScreen> {
                 : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                // Trạm đón/trả của con — thông tin quan trọng nhất với phụ huynh
+                if (_childStop != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: AppCard(
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36, height: 36,
+                            decoration: BoxDecoration(
+                              color: (_childStop!.done
+                                      ? AppColors.present
+                                      : _childColor)
+                                  .withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              _childStop!.done
+                                  ? Icons.where_to_vote_rounded
+                                  : Icons.escalator_warning_rounded,
+                              color: _childStop!.done
+                                  ? AppColors.present
+                                  : _childColor,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _isAfternoonSession
+                                      ? 'Điểm trả${_childName.isNotEmpty ? ' bé $_childName' : ' của bé'}'
+                                      : 'Điểm đón${_childName.isNotEmpty ? ' bé $_childName' : ' của bé'}',
+                                  style: GoogleFonts.dmSans(
+                                      fontSize: 11,
+                                      color: AppColors.textSub),
+                                ),
+                                Text(
+                                  _childStop!.name,
+                                  style: GoogleFonts.dmSans(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_childStop!.done)
+                            Text('Xe đã qua',
+                                style: GoogleFonts.dmSans(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.present))
+                          else
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(_distToChildStop,
+                                    style: GoogleFonts.dmSans(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: _childColor)),
+                                Text('Dự kiến $_etaToChildStop',
+                                    style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: AppColors.textSub)),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+
                 // Route banner — shown when Pi sends route info
                 if (_gps != null && _gps!.routeToName.isNotEmpty)
                   Padding(
@@ -689,12 +932,24 @@ class _MapScreenState extends State<MapScreen> {
                 AppCard(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 8),
-                  child: Column(
-                    children: List.generate(_stops.length, (i) {
-                      final stop = _stops[i];
-                      final isLast = i == _stops.length - 1;
-                      final isDone = _isDone(stop);
-                      final isCurrent = _isCurrent(stop);
+                  child: _stops.isEmpty
+                      ? Padding(
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(
+                            'Chưa có lộ trình — tài xế chưa bắt đầu chuyến.',
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: AppColors.textSub),
+                          ),
+                        )
+                      : Column(
+                    children: [
+                      ...List.generate(_stops.length, (i) {
+                      final stop      = _stops[i];
+                      final isDone    = stop.done;
+                      final isCurrent = i == _currentStopIdx;
+                      final isChild   =
+                          stop.id.isNotEmpty && stop.id == _childStopId;
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -709,12 +964,16 @@ class _MapScreenState extends State<MapScreen> {
                                       ? AppColors.present
                                       : isCurrent
                                       ? AppColors.primary
+                                      : isChild
+                                      ? _childColor
                                       : AppColors.border,
                                   border: Border.all(
                                     color: isDone
                                         ? AppColors.present
                                         : isCurrent
                                         ? AppColors.primary
+                                        : isChild
+                                        ? _childColor
                                         : AppColors.textHint,
                                     width: 2,
                                   ),
@@ -726,14 +985,14 @@ class _MapScreenState extends State<MapScreen> {
                                         color: Colors.white))
                                     : null,
                               ),
-                              if (!isLast)
-                                Container(
-                                    width: 2,
-                                    height: 36,
-                                    color: isDone
-                                        ? AppColors.present
-                                        .withValues(alpha:0.4)
-                                        : AppColors.border),
+                              // Connector luôn hiện — dòng cuối là trường
+                              Container(
+                                  width: 2,
+                                  height: 36,
+                                  color: isDone
+                                      ? AppColors.present
+                                      .withValues(alpha:0.4)
+                                      : AppColors.border),
                             ],
                           ),
                           const SizedBox(width: 14),
@@ -750,7 +1009,7 @@ class _MapScreenState extends State<MapScreen> {
                                       child: Text(stop.name,
                                           style: GoogleFonts.dmSans(
                                             fontSize: 13,
-                                            fontWeight: isCurrent
+                                            fontWeight: isCurrent || isChild
                                                 ? FontWeight.w600
                                                 : FontWeight.w400,
                                             color: isCurrent
@@ -784,6 +1043,32 @@ class _MapScreenState extends State<MapScreen> {
                                                 color:
                                                 AppColors.primary)),
                                       ),
+                                    if (isChild)
+                                      Padding(
+                                        padding: const EdgeInsets.only(
+                                            left: 4),
+                                        child: Container(
+                                          padding: const EdgeInsets
+                                              .symmetric(
+                                              horizontal: 8,
+                                              vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: _childColor
+                                                .withValues(alpha: 0.1),
+                                            borderRadius:
+                                            BorderRadius.circular(10),
+                                          ),
+                                          child: Text(
+                                              _isAfternoonSession
+                                                  ? 'Trả bé'
+                                                  : 'Đón bé',
+                                              style: GoogleFonts.dmSans(
+                                                  fontSize: 10,
+                                                  fontWeight:
+                                                  FontWeight.w600,
+                                                  color: _childColor)),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -792,6 +1077,84 @@ class _MapScreenState extends State<MapScreen> {
                         ],
                       );
                     }),
+                      // Trường — điểm cuối của cả buổi sáng lẫn buổi chiều
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Column(
+                            children: [
+                              const SizedBox(height: 14),
+                              Container(
+                                width: 14, height: 14,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _currentStopIdx >= _stops.length
+                                      ? AppColors.primary
+                                      : AppColors.border,
+                                  border: Border.all(
+                                    color:
+                                        _currentStopIdx >= _stops.length
+                                            ? AppColors.primary
+                                            : AppColors.textHint,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.school_rounded,
+                                      size: 16,
+                                      color: AppColors.present),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      _school?.name ?? 'Trường học',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 13,
+                                        fontWeight: _currentStopIdx >=
+                                                _stops.length
+                                            ? FontWeight.w600
+                                            : FontWeight.w400,
+                                        color: _currentStopIdx >=
+                                                _stops.length
+                                            ? AppColors.primary
+                                            : AppColors.textSub,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_currentStopIdx >= _stops.length)
+                                    Container(
+                                      padding: const EdgeInsets
+                                          .symmetric(
+                                          horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            AppColors.primarySurface,
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                      ),
+                                      child: Text('Xe đang đến',
+                                          style: GoogleFonts.dmSans(
+                                              fontSize: 10,
+                                              fontWeight:
+                                                  FontWeight.w600,
+                                              color:
+                                                  AppColors.primary)),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 80),
