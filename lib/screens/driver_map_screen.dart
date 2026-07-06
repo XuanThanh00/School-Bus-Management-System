@@ -409,7 +409,7 @@ class _DriverMapScreenState extends State<DriverMapScreen> {
       final coords =
           waypoints.map((p) => '${p.longitude},${p.latitude}').join(';');
       final uri = Uri.parse(
-          'http://router.project-osrm.org/route/v1/driving/$coords'
+          'https://router.project-osrm.org/route/v1/driving/$coords'
           '?geometries=geojson&overview=full');
       final response =
           await http.get(uri).timeout(const Duration(seconds: 10));

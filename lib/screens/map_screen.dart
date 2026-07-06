@@ -152,6 +152,11 @@ class _MapScreenState extends State<MapScreen> {
   bool _loadingSchool = true;
   bool _autoFollow    = true; // false khi phụ huynh tự kéo/zoom bản đồ
 
+  // Route quá 1h không được tài xế cập nhật = chuyến đã kết thúc → ẩn
+  static const _routeMaxAgeMs = 60 * 60 * 1000;
+  int    _routeUpdatedAtMs = 0;
+  Timer? _staleTimer;
+
   bool get _loading => _loadingGps || _loadingRoute || _loadingSchool;
 
   bool get _isAfternoonSession => _session == 'afternoon';
@@ -215,13 +220,30 @@ class _MapScreenState extends State<MapScreen> {
     _loadChildStop();
     _listenGps();
     _listenRoute();
+    // RTDB chỉ bắn event khi dữ liệu đổi — route có thể trở nên cũ
+    // trong lúc app đang mở, nên kiểm tra định kỳ để ẩn
+    _staleTimer = Timer.periodic(
+        const Duration(minutes: 5), (_) => _hideRouteIfStale());
   }
 
   @override
   void dispose() {
     _gpsSub?.cancel();
     _routeSub?.cancel();
+    _staleTimer?.cancel();
     super.dispose();
+  }
+
+  void _hideRouteIfStale() {
+    if (_routeUpdatedAtMs == 0 || !mounted) return;
+    final age = DateTime.now().millisecondsSinceEpoch - _routeUpdatedAtMs;
+    if (age > _routeMaxAgeMs) {
+      setState(() {
+        _routePoints      = [];
+        _stops            = [];
+        _routeUpdatedAtMs = 0;
+      });
+    }
   }
 
   Future<void> _loadSchool() async {
@@ -284,14 +306,22 @@ class _MapScreenState extends State<MapScreen> {
         .onValue
         .listen((event) {
       if (!mounted) return;
-      var points     = <LatLng>[];
-      var stops      = <_StopData>[];
-      var session    = 'morning';
-      var currentIdx = 0;
+      var points      = <LatLng>[];
+      var stops       = <_StopData>[];
+      var session     = 'morning';
+      var currentIdx  = 0;
+      var updatedAtMs = 0;
       final v = event.snapshot.value;
       if (v is Map) {
         try {
-          final data    = Map.from(v);
+          final data      = Map.from(v);
+          final updatedAt = (data['updatedAt'] as num?)?.toInt() ?? 0;
+          final ageMs     =
+              DateTime.now().millisecondsSinceEpoch - updatedAt;
+          // Route quá 1h không cập nhật = chuyến đã kết thúc → bỏ qua,
+          // không hiển thị tuyến/trạm cũ cho phụ huynh
+          if (ageMs > _routeMaxAgeMs) throw Exception('stale route');
+          updatedAtMs = updatedAt;
           final encoded = data['polyline']?.toString() ?? '';
           if (encoded.isNotEmpty) points = _decodePolyline(encoded);
           session    = data['session']?.toString() ?? 'morning';
@@ -314,11 +344,12 @@ class _MapScreenState extends State<MapScreen> {
         } catch (_) {}
       }
       setState(() {
-        _routePoints    = points;
-        _stops          = stops;
-        _session        = session;
-        _currentStopIdx = currentIdx;
-        _loadingRoute   = false;
+        _routePoints      = points;
+        _stops            = stops;
+        _session          = session;
+        _currentStopIdx   = currentIdx;
+        _routeUpdatedAtMs = updatedAtMs;
+        _loadingRoute     = false;
       });
     }, onError: (_) {
       if (mounted) setState(() => _loadingRoute = false);

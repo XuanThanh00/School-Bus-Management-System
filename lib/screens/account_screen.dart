@@ -209,30 +209,18 @@ class _AccountScreenState extends State<AccountScreen> {
         const SectionTitle('CÀI ĐẶT'),
         AppCard(
           padding: EdgeInsets.zero,
-          child: Column(
-            children: [
-              _SettingTile(
-                icon: Icons.notifications_outlined,
-                iconColor: AppColors.primary,
-                title: 'Thông báo',
-                subtitle: 'Bật/tắt thông báo điểm danh',
-                onTap: () {},
-              ),
-              const Divider(height: 1, indent: 56, color: AppColors.border),
-              _SettingTile(
-                icon: Icons.lock_outline_rounded,
-                iconColor: AppColors.pending,
-                title: 'Đổi mật khẩu',
-                subtitle: 'Thay đổi mật khẩu đăng nhập',
-                onTap: () => _showChangePassword(context),
-              ),
-            ],
+          child: _SettingTile(
+            icon: Icons.lock_outline_rounded,
+            iconColor: AppColors.pending,
+            title: 'Đổi mật khẩu',
+            subtitle: 'Thay đổi mật khẩu đăng nhập',
+            onTap: () => _showChangePassword(context),
           ),
         ),
         const SizedBox(height: 16),
 
         const SectionTitle('THÔNG TIN ỨNG DỤNG'),
-        AppCard(
+        const AppCard(
           padding: EdgeInsets.zero,
           child: Column(
             children: [
@@ -243,7 +231,7 @@ class _AccountScreenState extends State<AccountScreen> {
                 subtitle: '1.0.0',
                 showArrow: false,
               ),
-              const Divider(height: 1, indent: 56, color: AppColors.border),
+              Divider(height: 1, indent: 56, color: AppColors.border),
               _SettingTile(
                 icon: Icons.school_rounded,
                 iconColor: AppColors.textSub,

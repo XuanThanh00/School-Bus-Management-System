@@ -228,8 +228,11 @@ class _HomeScreenState extends State<HomeScreen> {
             final rec = (doc.exists && doc.data() != null)
                 ? _AttendanceRecord.fromMap(doc.data()!) : null;
             setState(() {
-              if (isMorning) _morningRecord   = rec;
-              else           _afternoonRecord = rec;
+              if (isMorning) {
+                _morningRecord = rec;
+              } else {
+                _afternoonRecord = rec;
+              }
             });
           }, onError: (_) {});
           if (isMorning) {
@@ -266,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     const days = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
 
-    _AttendanceRecord? _rec(DocumentSnapshot doc) =>
+    _AttendanceRecord? parseRec(DocumentSnapshot doc) =>
         (doc.exists && doc.data() != null)
             ? _AttendanceRecord.fromMap(doc.data()! as Map<String, dynamic>)
             : null;
@@ -281,8 +284,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ]).then((docs) => (
             dateKey:   key,
             dateLabel: label,
-            morning:   _rec(docs[0]),
-            afternoon: _rec(docs[1]),
+            morning:   parseRec(docs[0]),
+            afternoon: parseRec(docs[1]),
           ));
     });
 
@@ -353,14 +356,6 @@ class _HomeScreenState extends State<HomeScreen> {
             pinned: true,
             backgroundColor: AppColors.primary,
             flexibleSpace: FlexibleSpaceBar(background: _buildHeader()),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined,
-                    color: Colors.white, size: 24),
-                onPressed: () {},
-              ),
-              const SizedBox(width: 4),
-            ],
           ),
           SliverPadding(
             padding: const EdgeInsets.all(16),
@@ -518,12 +513,13 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ];
       return List.generate(items.length, (i) {
-        final item      = items[i];
-        final isLast    = i == items.length - 1;
-        final showImage = i == 1 && isBoarded && rec?.imageData != null;
+        final item   = items[i];
+        final isLast = i == items.length - 1;
+        // Ảnh điểm danh chỉ hiện ở bước "lên xe" (i == 1)
+        final imageData = (i == 1 && isBoarded) ? rec?.imageData : null;
 
         double connectorH;
-        if (showImage) {
+        if (imageData != null) {
           connectorH = item.gps.isNotEmpty ? 128 : 108;
         } else {
           connectorH = item.gps.isNotEmpty ? 52 : 36;
@@ -588,14 +584,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                     ],
-                    if (showImage) ...[
+                    if (imageData != null) ...[
                       const SizedBox(height: 8),
                       GestureDetector(
-                        onTap: () => _showImageDialog(rec!.imageData!),
+                        onTap: () => _showImageDialog(imageData),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.memory(
-                            base64Decode(rec!.imageData!.split(',').last),
+                            base64Decode(imageData.split(',').last),
                             width: 72,
                             height: 72,
                             fit: BoxFit.cover,

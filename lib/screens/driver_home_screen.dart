@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -56,6 +57,7 @@ class _StudentItem {
   final String studentId;
   final String name;
   final String className;
+  final String busStopId;
   final String attendanceStatus;
   final String? imageData;
 
@@ -63,6 +65,7 @@ class _StudentItem {
     required this.studentId,
     required this.name,
     required this.className,
+    required this.busStopId,
     required this.attendanceStatus,
     this.imageData,
   });
@@ -73,6 +76,7 @@ class _StudentItem {
       studentId:        d['studentId']?.toString() ?? '',
       name:             d['name']?.toString() ?? '',
       className:        d['class']?.toString() ?? '',
+      busStopId:        d['busStopId']?.toString() ?? '',
       attendanceStatus: d['attendanceStatus']?.toString() ?? 'not_boarded',
       imageData:        d['imageData']?.toString(),
     );
@@ -91,6 +95,7 @@ class DriverHomeScreen extends StatefulWidget {
 class _DriverHomeScreenState extends State<DriverHomeScreen> {
   _DriverData?      _driver;
   List<_StopGroup>  _stopGroups = [];
+  StreamSubscription? _studentsSub;
   bool   _loading = true;
   String? _error;
 
@@ -98,6 +103,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   void initState() {
     super.initState();
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _studentsSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -125,7 +136,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       final stops = stopSnaps
           .where((s) => s.exists)
           .map((s) {
-            final d = s.data()! as Map<String, dynamic>;
+            final d = s.data()!;
             return (
               id:    s.id,
               name:  d['name']?.toString() ?? '',
@@ -135,34 +146,44 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           .toList()
         ..sort((a, b) => a.order.compareTo(b.order));
 
-      // Load students của từng trạm
-      final groups = <_StopGroup>[];
-      for (final stop in stops) {
-        final snap = await fs
-            .collection('students')
-            .where('busStopId', isEqualTo: stop.id)
-            .get();
-        final students = snap.docs
-            .map((d) => _StudentItem.fromDoc(d))
-            .toList()
-          ..sort((a, b) => a.name.compareTo(b.name));
-        groups.add(_StopGroup(
-          stopName: stop.name,
-          order:    stop.order,
-          students: students,
-        ));
-      }
-
-      if (mounted) {
-        setState(() {
-          _driver     = driver;
-          _stopGroups = groups;
-          _loading    = false;
-        });
-      }
+      if (mounted) setState(() => _driver = driver);
+      _listenStudents(stops);
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = e.toString(); });
     }
+  }
+
+  // Stream realtime — badge trạng thái tự đổi khi học sinh quẹt thẻ,
+  // tài xế không cần bấm refresh. whereIn giới hạn 30 giá trị (đủ cho
+  // số trạm của 1 tài xế).
+  void _listenStudents(List<({String id, String name, int order})> stops) {
+    _studentsSub?.cancel();
+    if (stops.isEmpty) {
+      if (mounted) setState(() { _stopGroups = []; _loading = false; });
+      return;
+    }
+    _studentsSub = FirebaseFirestore.instance
+        .collection('students')
+        .where('busStopId', whereIn: stops.map((s) => s.id).toList())
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final all = snap.docs.map(_StudentItem.fromDoc).toList();
+      final groups = stops.map((stop) {
+        final students = all
+            .where((s) => s.busStopId == stop.id)
+            .toList()
+          ..sort((a, b) => a.name.compareTo(b.name));
+        return _StopGroup(
+          stopName: stop.name,
+          order:    stop.order,
+          students: students,
+        );
+      }).toList();
+      setState(() { _stopGroups = groups; _loading = false; });
+    }, onError: (e) {
+      if (mounted) setState(() { _loading = false; _error = e.toString(); });
+    });
   }
 
   List<_StudentItem> get _allStudents =>
