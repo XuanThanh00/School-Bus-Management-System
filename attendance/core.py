@@ -59,7 +59,7 @@ class StopManager:
         self._reminder_sent: bool         = False
         self._reminder_time: float | None = None
         self._lock = threading.Lock()
-        self.min_board_seconds: int = MIN_BOARD_SECONDS  # updated after load()
+        self.min_board_seconds: int = MIN_BOARD_SECONDS
 
     # ── Setup ─────────────────────────────────────────────
 
@@ -67,21 +67,6 @@ class StopManager:
         self._stops            = self._cloud.load_stops()
         self._school           = self._cloud.load_school_config()
         self._students_by_stop = self._cloud.load_students_by_stop()
-        self._calc_min_board_seconds()
-
-    def _calc_min_board_seconds(self):
-        """Set min_board_seconds = 80% of travel time from furthest stop to school at 40 km/h."""
-        if not self._stops or not self._school.get("lat"):
-            return
-        s_lat, s_lng = self._school["lat"], self._school["lng"]
-        max_dist = max(
-            self._dist_m(s["lat"], s["lng"], s_lat, s_lng)
-            for s in self._stops
-        )
-        travel_s = (max_dist / 1000.0) / 40.0 * 3600.0
-        self.min_board_seconds = max(60, int(travel_s * 0.8))
-        print(f"  [STOP] min_board_seconds = {self.min_board_seconds}s "
-              f"(farthest: {max_dist:.0f}m, 40km/h, 80%)")
 
     # ── Route state ───────────────────────────────────────
 

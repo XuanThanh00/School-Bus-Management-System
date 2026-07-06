@@ -9,8 +9,8 @@ UID_FILE        = "registered_uids.txt"
 DB_SQLITE       = "bus_system.db"
 
 # ── Face recognition ───────────────────────────────────────
-THRESHOLD_HIGH  = 0.4
-THRESHOLD_LOW   = 0.25
+THRESHOLD_HIGH  = 0.5
+THRESHOLD_LOW   = 0.5
 CONFIRM_FRAMES  = 2
 THRESHOLD       = (THRESHOLD_LOW + THRESHOLD_HIGH) / 2   # 0.325
 
@@ -18,7 +18,7 @@ THRESHOLD       = (THRESHOLD_LOW + THRESHOLD_HIGH) / 2   # 0.325
 MATCH_WINDOW    = 30.0
 
 # ── Master key ─────────────────────────────────────────────
-MASTER_KEY_UID      = "0353E326"
+MASTER_KEY_UID      = "731F3827"
 MASTER_KEY_TIMEOUT  = 30
 
 # ── Camera ─────────────────────────────────────────────────
@@ -54,7 +54,7 @@ UART_STM32_BAUD  = 115200
 STM32_RESET_PIN  = None
 
 # ── Audio volume (0–30, default 25) ───────────────────────
-MP3_VOLUME          = 10
+MP3_VOLUME          = 15
 
 # ── Audio tracks played via STM32 → MP3-TF-16P ────────────
 TRACK_INVITE_SCAN   = 1   # "Please scan your card"
@@ -69,7 +69,7 @@ HB_PI_INTERVAL       = 5.0    # seconds between HB_PI heartbeats to STM32
 STM32_HB_TIMEOUT     = 30.0   # seconds of silence before warning + STM32 reset
 FACE_PROMPT_COOLDOWN = 30.0   # seconds between "invite scan" audio prompts
 RFID_WAIT_TIMEOUT    = 30.0   # seconds to wait for RFID after face confirmed
-MIN_BOARD_SECONDS    = 300    # min seconds between boarding and alighting (5 min)
+MIN_BOARD_SECONDS    = 30     # min seconds between boarding and alighting
 
 # hour < MORNING_END_HOUR → "morning" session; >= → "afternoon"
 MORNING_END_HOUR     = 12
